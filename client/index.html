@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { theme: { extend: { colors: {} } } }</script>
+  <script type="module" src="js/index.js" defer></script>
+  <title>WebRtc-Project</title>
+</head>
+
+<body class="min-h-screen text-center flex flex-col justify-evenly">
+  <h1 class="text-5xl text-sky-400 mb-5">WebRtc Project</h1>
+
+  <header id="chatProfile">
+    <div class="flex flex-col w-2/4 mx-auto mb-3">
+      <label for="name" class="text-4xl text-blue-700">Name</label>
+      <input type="text" id="name"
+        class="p-3 rounded border-2 border-cyan-500 focus:border-purple-800 active:border-purple-800" value="anonymous"
+        placeholder="請輸入暱稱" />
+    </div>
+    <div class="flex flex-col w-2/4 mx-auto mb-3">
+      <label for="roles" class="text-4xl text-blue-700">Permissions</label>
+      <select id="roles" class="p-3 rounded border-2 border-cyan-500 focus:border-purple-800 active:border-purple-800">
+        <option value="admin">管理者</option>
+        <option value="member">成員</option>
+        <option value="visitor">訪客</option>
+      </select>
+    </div>
+    <div class="flex flex-col w-2/4 mx-auto mb-3">
+      <label for="room-id" class="text-4xl text-blue-700">Room Id</label>
+      <input type="text" id="room-id"
+        class="p-3 rounded border-2 border-cyan-500 focus:border-purple-800 active:border-purple-800"
+        placeholder="請輸入聊天室 id" value="Your-Room-Id" />
+    </div>
+    <div>
+      <button id="joinBtn"
+        class="w-48 text-gray-600 text-md bg-sky-100 hover:bg-sky-500 hover:text-white p-3 rounded-full">join
+        room
+      </button>
+    </div>
+  </header>
+  <main id="chatArea" class="mx-12 mb-6 hidden">
+    <section class="flex gap-3 my-5">
+      <section class="flex-1">
+        <video id="localVideo" width="100%" autoplay muted playsinline></video>
+
+        <video id="remoteVideo" width="100%" autoplay playsinline></video>
+      </section>
+      <section class="flex-1 flex flex-col justify-between">
+        <ul id="chatMessageWrapper" class="border border-teal-500 h-full mb-4"></ul>
+        <input type="textarea" id="inputText"
+          class="p-3 rounded border-2 border-cyan-500 focus:border-purple-800 active:border-purple-800 whitespace-pre-wrap" />
+      </section>
+    </section>
+    <section class="flex flex-wrap gap-x-2">
+      <button id="openMediaBtn"
+        class="flex-1 text-gray-600 text-md bg-sky-100 hover:bg-sky-500 hover:text-white p-3 rounded-full">open
+        video</button>
+
+      <button id="sendOfferBtn"
+        class="flex-1 text-gray-600 text-md bg-sky-100 hover:bg-sky-500 hover:text-white p-3 rounded-full">send
+        offer</button>
+
+      <button id="getInfoBtn"
+        class="flex-1 text-gray-600 text-md bg-sky-100 hover:bg-sky-500 hover:text-white p-3 rounded-full">user
+        info</button>
+
+      <button id="leaveBtn"
+        class="flex-1 text-gray-600 text-md bg-sky-100 hover:bg-sky-500 hover:text-white p-3 rounded-full">leave
+        room</button>
+    </section>
+  </main>
+</body>
+
+</html>
