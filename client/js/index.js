@@ -44,10 +44,7 @@ function handleJoinRoom() {
 
   storage.set('info', info);
   proxyData.info = info;
-  ws.sendMessage({
-    type: MESSAGE_TYPE.JOIN_ROOM,
-    payload: info,
-  });
+  ws.joinRoom(info);
 }
 
 // 發送聊天室訊息
@@ -71,7 +68,8 @@ function handleUserInfo() {
 // 離開聊天室
 function handleLeaveRoom() {
   storage.clear();
-  proxyData.info = {};
+  proxyData.info = { };
+  proxyData.messages = [];
   ws.leaveRoom();
 };
 
@@ -111,20 +109,23 @@ function handleProxyData(obj, key, val, _receive) {
     }
     if (Array.isArray(val)) {
       obj[key] = val;
-      const fragment = document.createDocumentFragment();
 
-      obj[key].forEach(message => {
-        const tmpDiv = document.createElement('div');
-        tmpDiv.innerHTML = renderMessageStr(message);
-        fragment.appendChild(tmpDiv.firstElementChild);
-      })
+      if (obj[key].length) {
+        const fragment = document.createDocumentFragment();
 
-      chatWrapper.appendChild(fragment);
+        obj[key].forEach(message => {
+          const tmpDiv = document.createElement('div');
+          tmpDiv.innerHTML = renderMessageStr(message);
+          fragment.appendChild(tmpDiv.firstElementChild);
+        })
+
+        chatWrapper.appendChild(fragment);
+      }
     }
   }
-  // console.log(`🚀 ~ handleProxyData ~ obj`, obj);
-  // console.log(`🚀 ~ handleProxyData ~ val`, val);
-  // console.log(`🚀 ~ handleProxyData ~ key`, key);
+  console.log(`🚀 ~ handleProxyData ~ obj`, obj);
+  console.log(`🚀 ~ handleProxyData ~ val`, val);
+  console.log(`🚀 ~ handleProxyData ~ key`, key);
   return true;
 }
 

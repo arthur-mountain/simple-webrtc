@@ -5,30 +5,27 @@ export default (() => {
 
   let ws;
   let healthCheckId;
+  let events = [
+    { type: 'open', listener: defaultOpenListener },
+    { type: 'message', listener: defaultMessageListener },
+    { type: 'close', listener: defaultCloseListener },
+    { type: 'error', listener: defaultErrorListener },
+  ];
   let SEND_TYPE = { JSON: 'JSON', BINARY: 'BINARY' };
 
   function init(listenerMap, TYPES) {
     SEND_TYPE = { ...SEND_TYPE, ...TYPES };
     ws = new WebSocket('ws://localhost:8001');
-    const events = [
-      { type: 'open', listener: openListener },
-      { type: 'message', listener: messageListener },
-      { type: 'close', listener: closeListener },
-      { type: 'error', listener: errorListener },
-    ].map(event => {
+    events = events.map(event => {
       const listener = listenerMap[event.type];
       return listener ? { ...event, listener } : event
-    });
-
-    events.forEach(({ type, listener }) => {
-      ws.addEventListener(type, listener);
     });
 
     window.addEventListener('beforeunload', leaveRoom)
   }
 
   // Default Listeners
-  function openListener(_evt) {
+  function defaultOpenListener(_evt) {
     console.log("Websocket opened");
     // Health Check
     let lastTime = Date.now();
@@ -49,11 +46,11 @@ export default (() => {
       sendMessage({ type: SEND_TYPE.JOIN_ROOM, payload });
     }
   }
-  function messageListener(evt) {
+  function defaultMessageListener(evt) {
     console.log("Message listener received: \n", JSON.parse(evt.data));
   }
   // TODO: should reconnect?
-  function closeListener(evt) {
+  function defaultCloseListener(evt) {
     handleReset();
     if (evt.wasClean) {
       console.log('Websocket disconnected');
@@ -61,7 +58,7 @@ export default (() => {
       console.log("Websocket connect dead");
     }
   }
-  function errorListener(_evt) {
+  function defaultErrorListener(_evt) {
     handleReset();
     console.log("Websocket connect error");
   }
@@ -86,12 +83,24 @@ export default (() => {
       }
     })
   };
+
+  function joinRoom(userInfo) {
+    events.forEach(({ type, listener }) => {
+      ws.addEventListener(type, listener);
+    });
+    sendMessage({ type: SEND_TYPE.JOIN_ROOM, payload: userInfo });
+  };
+
   function leaveRoom() {
+    events.forEach(({ type, listener }) => {
+      ws.removeEventListener(type, listener);
+    });
     sendMessage({ type: SEND_TYPE.LEAVE_ROOM });
   };
 
   return {
     init,
+    joinRoom,
     leaveRoom,
     sendMessage,
     SEND_TYPE,
