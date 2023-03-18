@@ -36,7 +36,9 @@ const handler = {
         prevRoomInfo = { roomId: client.roomId, order: client.order };
       };
       // 更新聊天室資訊
-      if (!handler.getWss().rooms[payload.roomId]) handler.getWss().rooms[payload.roomId] = [];
+      if (!handler.getWss().rooms[payload.roomId]) {
+        handler.getWss().rooms[payload.roomId] = [];
+      }
       handler.getWss().rooms[payload.roomId].push(client);
       client.order = handler.getWss().rooms[payload.roomId].length - 1;
       // 更新使用者資訊
@@ -56,8 +58,11 @@ const handler = {
     response.type = EVENT_TYPE.RESPONSE;
 
     handler.sendMessage(client, response);
+    handler.sendBroadcastMessage(client.id, {
+      type: response.type,
+      message: `${response.data.name} join to ${response.data.roomId}`,
+    });
   },
-
   handleSendOffer(client, payload) {
     console.log('Received offer');
     handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.RECEIVE_OFFER, code: 200, data: { offer: payload.offer }, message: "success" });
@@ -110,7 +115,9 @@ const handler = {
     handler.getWss().clients.forEach(client => {
       if (client.readyState !== WebSocket.OPEN) return;
 
-      if (client.id !== currentId) sendMessage(client, { type: EVENT_TYPE.MESSAGE, ...message });
+      if (client.id !== currentId) {
+        handler.sendMessage(client, { type: EVENT_TYPE.MESSAGE, ...message });
+      }
     });
   },
   sendMulticastMessage(userIds, message) {
@@ -120,7 +127,7 @@ const handler = {
 
       if (set.has(client.id)) {
         set.delete(client.id);
-        sendMessage(client, { type: EVENT_TYPE.MESSAGE, ...message });
+        handler.sendMessage(client, { type: EVENT_TYPE.MESSAGE, ...message });
       }
     });
     return [...set];

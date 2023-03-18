@@ -1,7 +1,6 @@
 'use strict';
 import ws from './websocket.js';
 import pc from './webRtc.js';
-import { storage } from './helper.js';
 
 window.addEventListener("DOMContentLoaded", init);
 
@@ -24,14 +23,23 @@ function handleEventRegister() {
     joinRoomBtn = document.querySelector('#joinBtn'),
     getInfoBtn = document.querySelector('#getInfoBtn'),
     leaveBtn = document.querySelector('#leaveBtn'),
-    inputText = document.querySelector('#inputText');
+    inputText = document.querySelector('#inputText'),
+    toggleChatWin = document.querySelector('#toggleChatWin');
 
   openMediaBtn.addEventListener("click", pc.handleOpenUserMedia);
   sendOfferBtn.addEventListener("click", pc.handleSendOffer);
   joinRoomBtn.addEventListener("click", handleJoinRoom);
   getInfoBtn.addEventListener("click", handleUserInfo);
+  toggleChatWin.addEventListener("click", handleToggleChatWin);
   leaveBtn.addEventListener("click", handleLeaveRoom);
   inputText.addEventListener("keyup", handleRoomSendMessage);
+}
+
+// 開關聊天窗
+function handleToggleChatWin(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  document.querySelector("#chatWin").classList.toggle("hidden");
 }
 
 // 加入聊天室
@@ -68,7 +76,7 @@ function handleUserInfo() {
 // 離開聊天室
 function handleLeaveRoom() {
   storage.clear();
-  proxyData.info = { };
+  proxyData.info = {};
   proxyData.messages = [];
   ws.leaveRoom();
 };
@@ -139,14 +147,14 @@ async function handleWsMessage(evt) {
   switch (resp.type) {
     // 接收訊息
     case MESSAGE_TYPE.MESSAGE: {
-      console.log('RECEIVE_MESSAGE => \n', resp.message);
       proxyData.messages = resp.message;
+      log("RECEIVE_MESSAGE", resp.message);
       break;
     };
 
     // 接收Response
     case MESSAGE_TYPE.RESPONSE: {
-      console.log('RECEIVE_RESPONSE => \n', resp);
+      log("RECEIVE_RESPONSE", resp);
       break;
     };
 
@@ -158,7 +166,7 @@ async function handleWsMessage(evt) {
       await pc.handleOpenUserMedia();
       // step3: Create answer -> send answer and setLocalDesc(answer); 
       await pc.handleSendAnswer();
-      console.log('RECEIVE_OFFER => \n', resp.data.offer);
+      log("RECEIVE_OFFER", resp.data.offer);
       break;
     };
 
@@ -166,21 +174,21 @@ async function handleWsMessage(evt) {
     case MESSAGE_TYPE.RECEIVE_ANSWER: {
       // step1: Receive answer -> setRemoteDesc(answer)
       await pc.handleRemoteDescription(resp.data.answer);
-      console.log('RECEIVE_ANSWER => \n', resp.data.answer);
+      log("RECEIVE_ANSWER", resp.data.answer);
       break;
     };
 
     // 接收 WebRtc candidate，並加入到 WebRtc candidate 候選人中
     case MESSAGE_TYPE.RECEIVE_CANDIDATE: {
       pc.handleAppendNewCandidate(resp.data.candidate);
-      console.log('RECEIVE_CANDIDATE => \n', resp.data.candidate);
+      log("RECEIVE_CANDIDATE", resp.data.candidate);
       break;
     };
 
     // 儲存使用者資訊(id, name, role, roomId)
     case MESSAGE_TYPE.INFO: {
-      console.log('RECEIVE_INFO => \n', resp.data);
       proxyData.info = resp.data;
+      log("RECEIVE_INFO", resp.data);
       break;
     };
 

@@ -1,14 +1,12 @@
 'use strict';
 
 export default (() => {
-  const localVideo = document.querySelector('#localVideo');
-  const remoteVideo = document.querySelector('#remoteVideo');
-  const CHANNEL_TYPE = { SIMPLE: 'simple-channel', FILE: 'file-channel' };
+  const videoContainer = document.querySelector("#videoContainer");
+  const localVideo = videoContainer.querySelector('#localVideo');
   let pc;
   let webSocket;
   let SEND_TYPE;
   let localStream;
-  let dataChannel, fileChannel;
 
   function init({ ws }, MESSAGE_TYPE) {
     webSocket = ws;
@@ -18,24 +16,16 @@ export default (() => {
 
   // 取得視訊與語音資訊
   async function handleOpenUserMedia() {
-    console.log('handleOpenUserMedia pc =>', pc);
     const Constraints = { audio: true, video: true };
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia(Constraints);
+      localVideo.name = localStream.id;
       localVideo.srcObject = localStream;
       localStream.getTracks().forEach(track => {
         // console.log(`mediaTrack =>`, track);
         pc.addTrack(track, localStream);
       })
-      createDataChannel();
-
-      // // 取得裝置名稱
-      // const video = localStream.getVideoTracks();
-      // const audio = localStream.getAudioTracks();
-
-      // if (video.length > 0) console.log(`使用影像裝置 => ${video[0].label}`)
-      // if (audio.length > 0) console.log(`使用聲音裝置 => ${audio[0].label}`)
     } catch (error) {
       console.error('Open User Media error:\n', error)
     }
@@ -49,10 +39,18 @@ export default (() => {
       }]
     });
 
+    // 監聽 ICE 連接狀態
+    pc.oniceconnectionstatechange = (evt) => {
+      log("ICE 伺服器狀態變更", evt);
+      if (['failed;', 'closed'].includes(evt.target.iceGatheringState)) {
+        pc.close();
+      }
+    };
+
     // 監聽 ICE Server(找尋到 ICE 候選位置後，透過 WebSocket Server 與另一位配對)
     pc.onicecandidate = async (evt) => {
       if (!evt.candidate) return;
-      console.log('onIceCandidate => ', evt);
+      log("發現新 icecandidate", evt);
       // Send candidate to websocket server
       webSocket.sendMessage({
         type: SEND_TYPE.SEND_CANDIDATE,
@@ -60,18 +58,21 @@ export default (() => {
       });
     };
 
-    // 監聽 ICE 連接狀態
-    pc.oniceconnectionstatechange = (evt) => {
-      console.log('ICE 伺服器狀態變更 => ', evt);
-      if (evt.target.iceGatheringState === 'complete') pc.close()
-    };
-
     // 接收 track 傳入
     pc.ontrack = (evt) => {
-      if (remoteVideo.srcObject) return;
-
-      console.log(`Ontrack evt =>`, evt);
-      remoteVideo.srcObject = evt.streams[0];
+      const fragment = document.createDocumentFragment();
+      evt.streams.forEach(stream => {
+        if (videoContainer.children.namedItem(stream.id)) return;
+        const remoteVideo = document.createElement("video");
+        remoteVideo.setAttribute("name", stream.id);
+        remoteVideo.setAttribute("width", "100%");
+        remoteVideo.setAttribute("autoplay", true);
+        remoteVideo.setAttribute("playsinline", true);
+        remoteVideo.srcObject = stream;
+        fragment.appendChild(remoteVideo);
+      });
+      videoContainer.appendChild(fragment);
+      log("接收 track", evt);
     };
 
     // 每當 WebRtc 進行會話連線時，在addTrack後會觸發該事件，通常會在此處理 createOffer，來通知remote peer與我們連線
@@ -79,33 +80,8 @@ export default (() => {
       try {
         await handleSendOffer();
       } catch (err) {
-        console.log(`Onnegotiationneeded error =>`, err);
+        console.error(`Onnegotiationneeded error =>`, err);
       }
-    };
-
-    // 接收 data channel 資訊
-    pc.ondatachannel = (evt) => {
-      console.log(`Ondatachannel ~ evt =>`, evt);
-      const channel = evt.channel;
-
-      if (channel.label === CHANNEL_TYPE.SIMPLE) {
-        channel.onmessage = cEvt => {
-          console.log("Received simple data channel => ", cEvt)
-        };
-      }
-
-      if (channel.label === CHANNEL_TYPE.FILE) {
-        channel.onmessage = cEvt => {
-          console.log("Received file data channel => ", cEvt)
-        };
-      }
-
-      // channel.onopen = (evt) => {
-      //   console.log(`data channel opened`, evt);
-      // };
-      // channel.onclose = (evt) => {
-      //   console.log(`data channel closed`, evt);
-      // };
     };
   }
 
@@ -113,7 +89,7 @@ export default (() => {
   async function handleSendOffer() {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    console.log("Local description offer => ", offer);
+    log("創建 offer", offer);
 
     // 傳送 localVideo offer to others
     webSocket.sendMessage({
@@ -122,27 +98,17 @@ export default (() => {
     })
   }
 
-  // @TODO: may should receive multiple answer for multiple users
   // 建立 answer
   async function handleSendAnswer() {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    console.log("Local description answer => ", answer);
+    log("創建 answer", answer);
 
     // 傳送 answer to Others
     webSocket.sendMessage({
       type: SEND_TYPE.SEND_ANSWER,
       payload: { answer }
     })
-  }
-
-  // 創建 data channel
-  async function createDataChannel() {
-    if (!pc) return console.log('尚未開啟連接!!!');
-
-    // 建立 data channel 傳遞資訊
-    dataChannel = pc.createDataChannel(CHANNEL_TYPE.SIMPLE);
-    fileChannel = pc.createDataChannel(CHANNEL_TYPE.FILE);
   }
 
   // 新增 ice candidate 候選人
@@ -157,20 +123,11 @@ export default (() => {
     await pc.setRemoteDescription(desc);
   }
 
-  // Data channel 傳送 data
-  async function handleSendData(data) {
-    if (!pc) return console.log('尚未開啟連接!!!');
-    if (!datachannel) return console.log('尚未建立data-channel連接!!!');
-
-    datachannel.send(JSON.stringify(data));
-  }
-
   return {
     init,
     handleOpenUserMedia,
     handleSendOffer,
     handleSendAnswer,
-    handleSendData,
     handleRemoteDescription,
     handleAppendNewCandidate,
   };
