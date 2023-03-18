@@ -1,6 +1,5 @@
 // import fs from 'fs';
 import express from 'express';
-import { v5 as uuidv5 } from 'uuid';
 import { WebSocketServer, } from 'ws';
 import EVENT_TYPE from './eventType.js';
 import handler from "./utils.js";
@@ -40,19 +39,20 @@ function handleMessage(client) {
         client.ping();
         break;
       };
-      // 發送訊息
+      // 發送訊息(廣播到全部 user)
       case EVENT_TYPE.SEND_MESSAGE: {
-        handler.handleSendMessage(client, payload);
+        handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.MESSAGE, code: 200, message: payload.message });
+        handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 200, message: 'ok' });
         break;
       };
-      // 推播訊息
+      // 推播訊息(針對特定 user 進行訊息推播)
       case EVENT_TYPE.PUSH_MESSAGE: {
         handler.handlePushMessage(client, payload);
         break;
       };
-      // 加入聊天室
-      case EVENT_TYPE.JOIN_ROOM: {
-        handler.handleJoinRoom(client, payload);
+      // 開啟視訊頭
+      case EVENT_TYPE.OPEN_CAMERA: {
+        handler.handleClientCameraOpened(client);
         break;
       };
       // 接收與傳送 webRtc offer
@@ -70,14 +70,19 @@ function handleMessage(client) {
         handler.handleSendCandidate(client, payload);
         break;
       };
+      // 加入聊天室
+      case EVENT_TYPE.JOIN_ROOM: {
+        handler.handleJoinRoom(client, payload);
+        break;
+      };
       // 離開聊天室
       case EVENT_TYPE.LEAVE_ROOM: {
         handler.handleLeaveRoom(client);
         break;
       };
       // 回傳使用者資訊
-      case EVENT_TYPE.INFO: {
-        handler.handleGetUserInfo(client);
+      case EVENT_TYPE.PERSONAL: {
+        handler.handleGetPersonal(client);
         break;
       };
 
@@ -94,7 +99,7 @@ function handleConnected(ws, req) {
   ws.id = handler.generateUserId(req, now);
   ws.isAlive = 1;
   handler.sendMessage(ws, { timestamp: now });
-  handler.checkCleanUp();
+  handler.handleCheckCleanUp();
 
   // Health check
   ws.on('pong', () => {

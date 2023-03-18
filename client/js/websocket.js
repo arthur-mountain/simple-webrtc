@@ -21,7 +21,7 @@ export default (() => {
       return listener ? { ...event, listener } : event
     });
 
-    window.addEventListener('beforeunload', leaveRoom)
+    window.addEventListener('beforeunload', leaveRoom);
   }
 
   // Default Listeners

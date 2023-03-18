@@ -1,39 +1,91 @@
 'use strict';
 
+// 目前只建立一個 peer connect, 因此只能一對一
+// @TODO: 一對多，除了自己外，其他個別建立 peer connect
 export default (() => {
   const videoContainer = document.querySelector("#videoContainer");
   const localVideo = videoContainer.querySelector('#localVideo');
-  let pc;
   let webSocket;
   let SEND_TYPE;
   let localStream;
+  let isOpened = 0;
+  const peers = [];
 
   function init({ ws }, MESSAGE_TYPE) {
     webSocket = ws;
     SEND_TYPE = MESSAGE_TYPE;
-    initPeerConnection();
   };
 
   // 取得視訊與語音資訊
   async function handleOpenUserMedia() {
+    if (isOpened) return console.warn('media was already opened');
     const Constraints = { audio: true, video: true };
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia(Constraints);
       localVideo.name = localStream.id;
       localVideo.srcObject = localStream;
-      localStream.getTracks().forEach(track => {
-        // console.log(`mediaTrack =>`, track);
-        pc.addTrack(track, localStream);
-      })
+      // @TODO: create multiple peers for each other
+      // @TODO: 以下是否再，open media 後， 多個 webRtc 自動設置和 send message
+      // @TODO: 刪除 room users type，也許這裡連接時，直接新增 addWebRtc type 然後傳送 offer, 將回傳的資訊再處理建立多個 peer 
+      webSocket.sendMessage({ type: SEND_TYPE.OPEN_CAMERA });
+      isOpened = !0;
     } catch (error) {
       console.error('Open User Media error:\n', error)
     }
-  }
+  };
+
+  // 關閉視訊與語音資訊
+  async function handleCloseUserMedia() {
+    if (!isOpened) return console.warn('media was not opened yet');
+
+    // @TODO: 關閉 peer instance and send message, remove all of video
+  };
+
+  async function handleWebRtcMessage(resp) {
+    switch (resp.data.subtype) {
+      // 開啟視訊頭
+      case MESSAGE_TYPE.OPEN_CAMERA: {
+        log("RECEIVE OPEN_CAMERA", resp.data.data);
+        break;
+      };
+
+      // 接收 WebRtc Offer, 傳送 answer(ots)
+      case MESSAGE_TYPE.RECEIVE_OFFER: {
+        // step1: Receive offer -> setRemoteDesc(offer)
+        await handleRemoteDescription(resp.data.data.offer);
+        // step2: Init media
+        await handleOpenUserMedia();
+        // step3: Create answer -> send answer and setLocalDesc(answer); 
+        await handleSendAnswer();
+        log("RECEIVE_OFFER", resp.data.data.offer);
+        break;
+      };
+
+      // 接收 WebRtc Answer(ots)
+      case MESSAGE_TYPE.RECEIVE_ANSWER: {
+        // step1: Receive answer -> setRemoteDesc(answer)
+        await handleRemoteDescription(resp.data.data.answer);
+        log("RECEIVE_ANSWER", resp.data.data.answer);
+        break;
+      };
+
+      // 接收 WebRtc candidate，並加入到 WebRtc candidate 候選人中(ots)
+      case MESSAGE_TYPE.RECEIVE_CANDIDATE: {
+        handleAppendNewCandidate(resp.data.data.candidate);
+        log("RECEIVE_CANDIDATE", resp.data.data.candidate);
+        break;
+      };
+
+      default: {
+        console.error("UnHandle webRtc sub type", resp)
+      }
+    }
+  };
 
   // 建立 P2P 連線
-  function initPeerConnection() {
-    pc = new RTCPeerConnection({
+  function createRtcConnect() {
+    const pc = new RTCPeerConnection({
       iceServers: [{
         urls: 'stun:stun.l.google.com:19302' // Google's public STUN server
       }]
@@ -83,6 +135,14 @@ export default (() => {
         console.error(`Onnegotiationneeded error =>`, err);
       }
     };
+
+    // set local stream to each peer instance
+    localStream.getTracks().forEach(track => {
+      // log(`local track`, track);
+      pc.addTrack(track, localStream);
+    });
+
+    return pc;
   }
 
   // 建立 localVideo offer, 設置 localDescription(本地流配置)
@@ -96,8 +156,7 @@ export default (() => {
       type: SEND_TYPE.SEND_OFFER,
       payload: { offer }
     })
-  }
-
+  };
   // 建立 answer
   async function handleSendAnswer() {
     const answer = await pc.createAnswer();
@@ -109,26 +168,22 @@ export default (() => {
       type: SEND_TYPE.SEND_ANSWER,
       payload: { answer }
     })
-  }
-
+  };
   // 新增 ice candidate 候選人
   async function handleAppendNewCandidate(candidate) {
     pc.addIceCandidate(new RTCIceCandidate(candidate));
-  }
-
+  };
   // 設置 remote description
   async function handleRemoteDescription(desc) {
     if (!pc) return console.log('尚未開啟連接!!!');
 
     await pc.setRemoteDescription(desc);
-  }
+  };
 
   return {
     init,
     handleOpenUserMedia,
-    handleSendOffer,
-    handleSendAnswer,
-    handleRemoteDescription,
-    handleAppendNewCandidate,
+    handleCloseUserMedia,
+    handleWebRtcMessage,
   };
 })();

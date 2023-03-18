@@ -6,45 +6,40 @@ const handler = {
   __wss: null,
   setWssConnect(wss) { handler.__wss = wss; },
   getWss() { return handler.__wss },
-  handleSendMessage(client, payload) {
-    handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 200, message: 'ok' });
-    handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.MESSAGE, code: 200, message: payload.message });
-  },
   handlePushMessage(client, payload) {
-    // TODO: payload.to array should use「id」or「name」?
-    if (payload.to) {
-      const failList = handler.sendMulticastMessage(payload.to);
+    if (!payload.to) {
+      handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 422, message: 'please given array of id in the room' });
+      return;
+    }
 
-      if (failList.length > 0) {
-        const message = `Those user not founded.\n [${failList}]`
-        handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 404, message });
-      }
-    } else {
-      handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.MESSAGE, message: `${payload.message}, \n this message from: ${client.id}` });
+    const failList = handler.sendMulticastMessage(payload.to);
+    if (failList.length > 0) {
+      const message = `Those user not founded.\n [${failList}]`
+      handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 404, message });
     }
   },
-
   handleJoinRoom(client, payload) {
     let response;
     let prevRoomInfo;
 
     if (!payload.roomId) {
-      response = { code: 400, message: 'Sorry the room id is required' };
+      response = { code: 404, message: 'Sorry the room id is required', subtype: EVENT_TYPE.ERROR };
     } else {
       // 更換聊天室，紀錄前個聊天室資訊
       if (client.roomId) {
         prevRoomInfo = { roomId: client.roomId, order: client.order };
       };
-      // 更新聊天室資訊
+      // 判斷聊天室是否存在，不存在則初始化
       if (!handler.getWss().rooms[payload.roomId]) {
         handler.getWss().rooms[payload.roomId] = [];
       }
-      handler.getWss().rooms[payload.roomId].push(client);
-      client.order = handler.getWss().rooms[payload.roomId].length - 1;
+      // 儲存該 room 所有的使用者資訊
+      const len = handler.getWss().rooms[payload.roomId].push(client);
+      client.order = len - 1;
       // 更新使用者資訊
       client.role = payload.role;
       client.roomId = payload.roomId;
-      response = { code: 200, data: { roomId: client.roomId, role: client.role }, message: 'success' };
+      response = { code: "S200", data: { id: client.id, roomId: client.roomId, role: client.role }, message: 'success' };
       // 更新使用者暱稱
       if (payload.name) {
         client.name = payload.name;
@@ -57,53 +52,112 @@ const handler = {
     }
     response.type = EVENT_TYPE.RESPONSE;
 
-    handler.sendMessage(client, response);
-    handler.sendBroadcastMessage(client.id, {
+    handler.sendMessage(client, handler.createReturnDataWithSubClass({
       type: response.type,
+      code: response.code,
+      message: response.message,
+      subtype: response.subtype,
+      data: response.data,
+    }));
+    handler.sendBroadcastMessage(client.id, {
+      type: EVENT_TYPE.JOIN_ROOM,
+      data: { id: client.id, },
       message: `${response.data.name} join to ${response.data.roomId}`,
     });
-  },
-  handleSendOffer(client, payload) {
-    console.log('Received offer');
-    handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.RECEIVE_OFFER, code: 200, data: { offer: payload.offer }, message: "success" });
-  },
-  handleSendAnswer(client, payload) {
-    console.log('Received answer');
-    handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.RECEIVE_ANSWER, code: 200, data: { answer: payload.answer }, message: "success" });
-  },
-  handleSendCandidate(client, payload) {
-    console.log('Received candidate');
-    handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.RECEIVE_CANDIDATE, code: 200, data: { candidate: payload.candidate }, message: "success" });
   },
   handleLeaveRoom(client) {
     handler.deleteClientFromRoom(client);
     handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 200, message: 'success' });
   },
-  handleGetUserInfo(client) {
-    handler.sendMessage(client, {
-      type: EVENT_TYPE.INFO,
-      code: 200,
+  handleClientCameraOpened(client) {
+    const users = handler.findClientsOfRoom(client);
+    // handler.sendMessage(client, handler.createReturnDataWithSubClass({
+    //   type: EVENT_TYPE.RESPONSE,
+    //   subtype: EVENT_TYPE.ROOM_USERS,
+    //   data: users,
+    // }));
+  },
+  handleSendOffer(client, payload) {
+    console.log('Received offer');
+    handler.sendBroadcastMessage(client.id, handler.createReturnDataWithSubClass({
+      type: EVENT_TYPE.WEB_RTC,
+      subtype: EVENT_TYPE.RECEIVE_OFFER,
+      data: { offer: payload.offer },
+    }));
+  },
+  handleSendAnswer(client, payload) {
+    console.log('Received answer');
+    handler.sendBroadcastMessage(client.id, handler.createReturnDataWithSubClass({
+      type: EVENT_TYPE.WEB_RTC,
+      subtype: EVENT_TYPE.RECEIVE_ANSWER,
+      data: { answer: payload.answer },
+    }));
+  },
+  handleSendCandidate(client, payload) {
+    console.log('Received candidate');
+    handler.sendBroadcastMessage(client.id, handler.createReturnDataWithSubClass({
+      type: EVENT_TYPE.WEB_RTC,
+      subtype: EVENT_TYPE.RECEIVE_CANDIDATE,
+      data: { candidate: payload.candidate },
+    }));
+  },
+  handleGetPersonal(client) {
+    handler.sendMessage(client, handler.createReturnDataWithSubClass({
+      type: EVENT_TYPE.RESPONSE,
+      subtype: EVENT_TYPE.PERSONAL,
       data: {
         id: client.id,
         name: client.name,
         role: client.role,
         roomId: client.roomId,
-      }
-    });
+      },
+    }));
+  },
+  // 每十五分鐘檢查聊天室、使用者狀態, 可根據情況判斷是否要 clearInterval
+  handleCheckCleanUp() {
+    setInterval(() => {
+      Object.keys(handler.getWss().rooms).forEach(key => {
+        if (handler.getWss().rooms[key].length === 0) {
+          // delete handler.getWss().rooms[key];
+          Reflect.deleteProperty(handler.getWss().rooms, key)
+        }
+      });
+      handler.getWss().clients.forEach(client => {
+        if (!client.isAlive) client.terminate();
+      })
+    }, 900000);
+  },
+  // TODO: Received binary data logic
+  handleBinaryData(data) {
+    console.log("Binary data: \n", data);
+    // Do something for binary data
+    // fs.writeFile('./my-img.jpeg', data, 'binary', (err) => {
+    //   if (!err) console.log('Binary save success');
+    // })
   },
 
-  //  findClient({ id, name }) {
-  //   let temp;
-  //   handler.getWss().clients.forEach(client => {
-  //     if (client.readyState !== WebSocket.OPEN) return;
+  /********* helper *********/
+  findClient({ id, name }) {
+    let temp;
+    handler.getWss().clients.forEach(client => {
+      if (client.readyState !== WebSocket.OPEN) return;
 
-  //     if (client.id === id || client.name === name) {
-  //       temp = client;
-  //     }
-  //   });
-  //   return temp;
-  // };
-  // WARN: 是否可能找不到UID?
+      if (client.id === id || client.name === name) {
+        temp = client;
+      }
+    });
+    return temp;
+  },
+  findClientsOfRoom(client) {
+    const temp = [];
+    const room = handler.getWss().rooms[client.roomId];
+    if (!room) return temp;
+    room.forEach(clientOfRoom => {
+      if (clientOfRoom.id === client.id) return;
+      temp.push(clientOfRoom.id);
+    });
+    return temp;
+  },
   deleteClientFromRoom(client) {
     const room = handler.getWss().rooms[client.roomId];
     if (room) {
@@ -140,28 +194,6 @@ const handler = {
       ws.send(data);
     }
   },
-  // 每十五分鐘檢查聊天室、使用者狀態, 可根據情況判斷是否要 clearInterval
-  checkCleanUp() {
-    setInterval(() => {
-      Object.keys(handler.getWss().rooms).forEach(key => {
-        if (handler.getWss().rooms[key].length === 0) {
-          // delete handler.getWss().rooms[key];
-          Reflect.deleteProperty(handler.getWss().rooms, key)
-        }
-      });
-      handler.getWss().clients.forEach(client => {
-        if (!client.isAlive) client.terminate();
-      })
-    }, 900000);
-  },
-  // TODO: Received binary data logic
-  handleBinaryData(data) {
-    console.log("Binary data: \n", data);
-    // Do something for binary data
-    // fs.writeFile('./my-img.jpeg', data, 'binary', (err) => {
-    //   if (!err) console.log('Binary save success');
-    // })
-  },
   generateUserId(req, now) {
     const namespace = process.env.UID_NAME_SPACE;
     const string =
@@ -169,6 +201,25 @@ const handler = {
 
     return uuidv5(string, namespace);
   },
+  createReturnDataWithSubClass({
+    type = EVENT_TYPE.RESPONSE,
+    code = 200,
+    message = "success",
+    subtype,
+    data,
+  }) {
+    const response = {
+      type,
+      code,
+      message,
+      data: { subtype, data },
+    };
+
+    if (!data) delete response.data.data;
+
+    return response;
+  },
+
 }
 
 export default handler;

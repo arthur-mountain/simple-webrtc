@@ -7,6 +7,7 @@ window.addEventListener("DOMContentLoaded", init);
 let MESSAGE_TYPE; // Message type
 const proxyData = new Proxy({ info: {}, messages: [] }, { set: handleProxyData });
 
+// @TODO: pc.createRtcConnect 會建立多個 peer connect for multiple room.
 async function init() {
   proxyData.info = storage.get('info') || {};
 
@@ -19,7 +20,6 @@ async function init() {
 // 註冊事件
 function handleEventRegister() {
   const openMediaBtn = document.querySelector('#openMediaBtn'),
-    sendOfferBtn = document.querySelector('#sendOfferBtn'),
     joinRoomBtn = document.querySelector('#joinBtn'),
     getInfoBtn = document.querySelector('#getInfoBtn'),
     leaveBtn = document.querySelector('#leaveBtn'),
@@ -27,9 +27,8 @@ function handleEventRegister() {
     toggleChatWin = document.querySelector('#toggleChatWin');
 
   openMediaBtn.addEventListener("click", pc.handleOpenUserMedia);
-  sendOfferBtn.addEventListener("click", pc.handleSendOffer);
   joinRoomBtn.addEventListener("click", handleJoinRoom);
-  getInfoBtn.addEventListener("click", handleUserInfo);
+  getInfoBtn.addEventListener("click", handlePersonal);
   toggleChatWin.addEventListener("click", handleToggleChatWin);
   leaveBtn.addEventListener("click", handleLeaveRoom);
   inputText.addEventListener("keyup", handleRoomSendMessage);
@@ -69,8 +68,8 @@ function handleRoomSendMessage(evt) {
 };
 
 // 取得使用者資訊
-function handleUserInfo() {
-  ws.sendMessage({ type: MESSAGE_TYPE.INFO });
+function handlePersonal() {
+  ws.sendMessage({ type: MESSAGE_TYPE.PERSONAL });
 };
 
 // 離開聊天室
@@ -144,54 +143,57 @@ async function handleWsMessage(evt) {
   //   return console.error(`UnExpect error!!! code: ${resp.code}`)
   // }
 
+  // self to self => s to s(sts)
+  // others to self => o to s(ots)
+  // self to other => t to o(sto)
   switch (resp.type) {
-    // 接收訊息
+    // 接收訊息(ots)
     case MESSAGE_TYPE.MESSAGE: {
       proxyData.messages = resp.message;
       log("RECEIVE_MESSAGE", resp.message);
       break;
     };
 
-    // 接收Response
+    // Response(sts)
     case MESSAGE_TYPE.RESPONSE: {
-      log("RECEIVE_RESPONSE", resp);
+      handleResponse(resp);
       break;
     };
 
-    // 接收 WebRtc Offer, 傳送 answer
-    case MESSAGE_TYPE.RECEIVE_OFFER: {
-      // step1: Receive offer -> setRemoteDesc(offer)
-      await pc.handleRemoteDescription(resp.data.offer);
-      // step2: Init media
-      await pc.handleOpenUserMedia();
-      // step3: Create answer -> send answer and setLocalDesc(answer); 
-      await pc.handleSendAnswer();
-      log("RECEIVE_OFFER", resp.data.offer);
+    // 加入聊天室(ots)
+    case MESSAGE_TYPE.JOIN_ROOM: {
+      // @TODO: send offer to resp.data.id, receive resp.data.id answer
+      log("SOME ONE JOIN ROOM", resp);
       break;
     };
 
-    // 接收 WebRtc Answer
-    case MESSAGE_TYPE.RECEIVE_ANSWER: {
-      // step1: Receive answer -> setRemoteDesc(answer)
-      await pc.handleRemoteDescription(resp.data.answer);
-      log("RECEIVE_ANSWER", resp.data.answer);
+    // webRtc(ots)
+    case MESSAGE_TYPE.WEB_RTC: {
+      pc.handleWebRtcMessage(resp);
       break;
     };
 
-    // 接收 WebRtc candidate，並加入到 WebRtc candidate 候選人中
-    case MESSAGE_TYPE.RECEIVE_CANDIDATE: {
-      pc.handleAppendNewCandidate(resp.data.candidate);
-      log("RECEIVE_CANDIDATE", resp.data.candidate);
-      break;
-    };
-
-    // 儲存使用者資訊(id, name, role, roomId)
-    case MESSAGE_TYPE.INFO: {
-      proxyData.info = resp.data;
-      log("RECEIVE_INFO", resp.data);
-      break;
-    };
-
-    default: return;
+    default: {
+      console.error("UnHandle ws message", resp);
+    }
   }
 };
+
+function handleResponse(resp) {
+  switch (resp.data.subtype) {
+    // 儲存使用者資訊(id, name, role, roomId)(ots)
+    case MESSAGE_TYPE.PERSONAL: {
+      proxyData.info = resp.data.data;
+      log("RECEIVE PERSONAL", resp.data.data);
+      break;
+    };
+
+    default: {
+      if (resp.code === "S200") { // ignore error, just log data
+        log("IGNORE THIS RECEIVE_RESPONSE", resp);
+      } else {
+        console.error("UnHandle response sub type", resp);
+      }
+    }
+  }
+}

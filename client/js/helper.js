@@ -6,9 +6,9 @@ const helpers = {
     clear: () => sessionStorage.clear(),
   },
   log: (title, content) => {
-    console.log(`*** ${title} ***`);
+    console.log(`********* [${title}] *********`);
     console.log(content);
-    console.log(`*** ${title} ***`, '\n');
+    console.log(`********* [${title}] *********`);
   }
 }
 

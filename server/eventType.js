@@ -1,16 +1,20 @@
 export default {
   // normal
   PING: "PING",
-  INFO: "INFO",
+  // response sub type
+  ERROR: "ERROR",
+  PERSONAL: "PERSONAL", // 取得個人資訊
+  ROOM_USERS: "PERSONAL",
   // room
   JOIN_ROOM: "JOIN_ROOM",
   LEAVE_ROOM: "LEAVE_ROOM",
   // message
+  MESSAGE: "MESSAGE",
   SEND_MESSAGE: "SEND_MESSAGE",
   PUSH_MESSAGE: "PUSH_MESSAGE",
   RESPONSE: "RESPONSE",
-  MESSAGE: "MESSAGE",
-  // webRtc
+  /*** webRtc ***/
+  WEB_RTC: "WEB_RTC",
   //offer
   SEND_OFFER: "SEND_OFFER",
   RECEIVE_OFFER: "RECEIVE_OFFER",
