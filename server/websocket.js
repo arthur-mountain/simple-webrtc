@@ -22,10 +22,15 @@ wss.on('connection', (ws, req) => {
   // Open
   ws.on('open', () => { console.log('WebSocket opened'); });
   // Close
-  ws.on('close', () => { console.log('WebSocket disconnected', ws); });
+  ws.on('close', handleDisconnected);
   // Message
   ws.on('message', handleMessage(ws));
 });
+
+function handleDisconnected(client) {
+  console.log('WebSocket disconnected');
+  handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.DISCONNECT, code: 200, message: `${client.id} 已離開聊天室`, data: { id: client.id } });
+}
 
 function handleMessage(client) {
   return function (data, isBinary) {
@@ -49,11 +54,6 @@ function handleMessage(client) {
         handler.handlePushMessage(client, payload);
         break;
       };
-      // 開啟視訊頭
-      case EVENT_TYPE.OPEN_CAMERA: {
-        handler.handleClientCameraOpened(client);
-        break;
-      };
       // 接收與傳送 webRtc offer
       case EVENT_TYPE.SEND_OFFER: {
         handler.handleSendOffer(client, payload);
@@ -64,7 +64,7 @@ function handleMessage(client) {
         handler.handleSendAnswer(client, payload);
         break;
       };
-      // 接收與傳送 webRtc answer
+      // 接收與傳送 webRtc candidate
       case EVENT_TYPE.SEND_CANDIDATE: {
         handler.handleSendCandidate(client, payload);
         break;

@@ -7,13 +7,14 @@ export default (() => {
   const localVideo = videoContainer.querySelector('#localVideo');
   const iceServers = [{
     urls: 'stun:stun.l.google.com:19302' // Google's public STUN server
+    // urls: ['stun:stun.l.google.com:19302', "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302", "stun:stun3.l.google.com:19302", "stun:stun4.l.google.com:19302",] // Google's public STUN server
   }];
-  let websocket;
   let pc;
+  let websocket;
   let SEND_TYPE;
   let localStream;
   let isOpened = 0;
-  const weakVideoPeerMap = new WeakMap();
+  // const weakVideoPeerMap = new WeakMap();
 
   function init({ ws }, MESSAGE_TYPE) {
     websocket = ws;
@@ -30,8 +31,6 @@ export default (() => {
       localVideo.name = localStream.id;
       localVideo.srcObject = localStream;
       // @TODO: create multiple peers for each other
-      // @TODO: 以下是否再，open media 後， 多個 webRtc 自動設置和 send message
-      // @TODO: 刪除 room users type，也許這裡連接時，直接新增 addWebRtc type 然後傳送 offer, 將回傳的資訊再處理建立多個 peer 
       await createRtcConnect();
       isOpened = !0;
     } catch (error) {
@@ -40,7 +39,7 @@ export default (() => {
   };
 
   // 關閉視訊與語音資訊
-  async function handleCloseUserMedia() {
+  function handleCloseUserMedia() {
     if (!isOpened) return console.warn('media was not opened yet');
 
     // @TODO: 關閉 peer instance and send message, remove all of video
@@ -69,7 +68,7 @@ export default (() => {
 
       // 接收 WebRtc candidate，並加入到 WebRtc candidate 候選人中(ots)
       case SEND_TYPE.RECEIVE_CANDIDATE: {
-        handleAppendNewCandidate(resp.data.data.candidate);
+        await handleAppendNewCandidate(resp.data.data.candidate);
         log("RECEIVE_CANDIDATE", resp.data.data.candidate);
         break;
       };
@@ -82,8 +81,12 @@ export default (() => {
 
   // 建立 P2P 連線
   async function createRtcConnect() {
-    const remoteVideo = document.createElement("video");
     pc = new RTCPeerConnection({ iceServers });
+    // set local stream to each peer instance
+    localStream.getTracks().forEach(track => {
+      // log(`local track`, track);
+      pc.addTrack(track, localStream);
+    });
 
     // 監聽 ICE 連接狀態
     pc.oniceconnectionstatechange = (evt) => {
@@ -106,13 +109,13 @@ export default (() => {
 
     // 接收 track 傳入
     pc.ontrack = (evt) => {
-      const stream = evt.streams[0];
-      if (videoContainer.children.namedItem(stream.id)) return;
-      remoteVideo.setAttribute("name", stream.id);
+      if (videoContainer.children.namedItem(evt.streams[0].id)) return;
+      const remoteVideo = document.createElement("video");
+      remoteVideo.setAttribute("name", evt.streams[0].id);
       remoteVideo.setAttribute("width", "100%");
       remoteVideo.setAttribute("autoplay", true);
       remoteVideo.setAttribute("playsinline", true);
-      remoteVideo.srcObject = stream;
+      remoteVideo.srcObject = evt.streams[0];
       videoContainer.appendChild(remoteVideo);
       log("接收 track", evt);
     };
@@ -126,13 +129,7 @@ export default (() => {
         console.error(`Onnegotiationneeded error =>`, err);
       }
     };
-
-    // set local stream to each peer instance
-    localStream.getTracks().forEach(track => {
-      // log(`local track`, track);
-      pc.addTrack(track, localStream);
-    });
-  }
+  };
 
   // 建立 offer, 設置 localDescription(本地流配置)
   async function handleSendOffer() {
@@ -150,15 +147,10 @@ export default (() => {
   };
   // 新增 ice candidate 候選人
   async function handleAppendNewCandidate(candidate) {
-    pc.addIceCandidate(new RTCIceCandidate(candidate));
+    await pc.addIceCandidate(new RTCIceCandidate(candidate));
   };
   // 設置 remote description
   async function handleRemoteDescription(desc) {
-    // 如果當前 peer 已經連線完畢(被關閉)，建立新的連接 for multiple peer connect
-    // if (pc.iceGatheringState === "closed") {
-    //   await createRtcConnect();
-    // }
-
     await pc.setRemoteDescription(desc);
   };
 

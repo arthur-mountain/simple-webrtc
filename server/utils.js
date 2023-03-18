@@ -69,7 +69,8 @@ const handler = {
   },
   handleLeaveRoom(client) {
     handler.deleteClientFromRoom(client);
-    handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 200, message: 'success' });
+    handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 200, message: 'success', text: "leave" });
+    handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.DISCONNECT, code: 200, message: `${client.id} 已離開聊天室`, data: { id: client.id } });
   },
   handleSendOffer(client, payload) {
     console.log('Received offer');

@@ -19,14 +19,14 @@ async function init() {
 
 // 註冊事件
 function handleEventRegister() {
-  const openMediaBtn = document.querySelector('#openMediaBtn'),
+  const mediaBtn = document.querySelector('#mediaBtn'),
     joinRoomBtn = document.querySelector('#joinBtn'),
     getInfoBtn = document.querySelector('#getInfoBtn'),
     leaveBtn = document.querySelector('#leaveBtn'),
     inputText = document.querySelector('#inputText'),
     toggleChatWin = document.querySelector('#toggleChatWin');
 
-  openMediaBtn.addEventListener("click", pc.handleOpenUserMedia);
+  mediaBtn.addEventListener("click", pc.handleOpenUserMedia);
   joinRoomBtn.addEventListener("click", handleJoinRoom);
   getInfoBtn.addEventListener("click", handlePersonal);
   toggleChatWin.addEventListener("click", handleToggleChatWin);
@@ -131,9 +131,9 @@ function handleProxyData(obj, key, val, _receive) {
       }
     }
   }
-  console.log(`🚀 ~ handleProxyData ~ obj`, obj);
-  console.log(`🚀 ~ handleProxyData ~ val`, val);
-  console.log(`🚀 ~ handleProxyData ~ key`, key);
+  // console.log(`🚀 ~ handleProxyData ~ obj`, obj);
+  // console.log(`🚀 ~ handleProxyData ~ val`, val);
+  // console.log(`🚀 ~ handleProxyData ~ key`, key);
   return true;
 }
 
@@ -163,7 +163,6 @@ async function handleWsMessage(evt) {
 
     // 加入聊天室(ots)
     case MESSAGE_TYPE.JOIN_ROOM: {
-      // @TODO: send offer to resp.data.id, receive resp.data.id answer
       log("SOME ONE JOIN ROOM", resp);
       break;
     };
@@ -171,6 +170,12 @@ async function handleWsMessage(evt) {
     // webRtc(ots)
     case MESSAGE_TYPE.WEB_RTC: {
       pc.handleWebRtcMessage(resp);
+      break;
+    };
+
+    // 有人離開聊天室(system)
+    case MESSAGE_TYPE.DISCONNECT: {
+      log("RECEIVE_DISCONNECT", resp);
       break;
     };
 

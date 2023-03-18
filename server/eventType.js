@@ -1,6 +1,8 @@
 export default {
   // normal
   PING: "PING",
+  // system
+  DISCONNECT: "DISCONNECT",
   // response sub type
   ERROR: "ERROR",
   PERSONAL: "PERSONAL", // 取得個人資訊
