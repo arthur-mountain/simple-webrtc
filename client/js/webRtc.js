@@ -5,14 +5,18 @@
 export default (() => {
   const videoContainer = document.querySelector("#videoContainer");
   const localVideo = videoContainer.querySelector('#localVideo');
-  let webSocket;
+  const iceServers = [{
+    urls: 'stun:stun.l.google.com:19302' // Google's public STUN server
+  }];
+  let websocket;
+  let pc;
   let SEND_TYPE;
   let localStream;
   let isOpened = 0;
-  const peers = [];
+  const weakVideoPeerMap = new WeakMap();
 
   function init({ ws }, MESSAGE_TYPE) {
-    webSocket = ws;
+    websocket = ws;
     SEND_TYPE = MESSAGE_TYPE;
   };
 
@@ -28,7 +32,7 @@ export default (() => {
       // @TODO: create multiple peers for each other
       // @TODO: 以下是否再，open media 後， 多個 webRtc 自動設置和 send message
       // @TODO: 刪除 room users type，也許這裡連接時，直接新增 addWebRtc type 然後傳送 offer, 將回傳的資訊再處理建立多個 peer 
-      webSocket.sendMessage({ type: SEND_TYPE.OPEN_CAMERA });
+      await createRtcConnect();
       isOpened = !0;
     } catch (error) {
       console.error('Open User Media error:\n', error)
@@ -43,27 +47,20 @@ export default (() => {
   };
 
   async function handleWebRtcMessage(resp) {
+    if (!pc || !isOpened) return;
     switch (resp.data.subtype) {
-      // 開啟視訊頭
-      case MESSAGE_TYPE.OPEN_CAMERA: {
-        log("RECEIVE OPEN_CAMERA", resp.data.data);
-        break;
-      };
-
       // 接收 WebRtc Offer, 傳送 answer(ots)
-      case MESSAGE_TYPE.RECEIVE_OFFER: {
+      case SEND_TYPE.RECEIVE_OFFER: {
         // step1: Receive offer -> setRemoteDesc(offer)
         await handleRemoteDescription(resp.data.data.offer);
-        // step2: Init media
-        await handleOpenUserMedia();
-        // step3: Create answer -> send answer and setLocalDesc(answer); 
+        // step2: Create answer -> send answer and setLocalDesc(answer); 
         await handleSendAnswer();
         log("RECEIVE_OFFER", resp.data.data.offer);
         break;
       };
 
       // 接收 WebRtc Answer(ots)
-      case MESSAGE_TYPE.RECEIVE_ANSWER: {
+      case SEND_TYPE.RECEIVE_ANSWER: {
         // step1: Receive answer -> setRemoteDesc(answer)
         await handleRemoteDescription(resp.data.data.answer);
         log("RECEIVE_ANSWER", resp.data.data.answer);
@@ -71,7 +68,7 @@ export default (() => {
       };
 
       // 接收 WebRtc candidate，並加入到 WebRtc candidate 候選人中(ots)
-      case MESSAGE_TYPE.RECEIVE_CANDIDATE: {
+      case SEND_TYPE.RECEIVE_CANDIDATE: {
         handleAppendNewCandidate(resp.data.data.candidate);
         log("RECEIVE_CANDIDATE", resp.data.data.candidate);
         break;
@@ -84,27 +81,24 @@ export default (() => {
   };
 
   // 建立 P2P 連線
-  function createRtcConnect() {
-    const pc = new RTCPeerConnection({
-      iceServers: [{
-        urls: 'stun:stun.l.google.com:19302' // Google's public STUN server
-      }]
-    });
+  async function createRtcConnect() {
+    const remoteVideo = document.createElement("video");
+    pc = new RTCPeerConnection({ iceServers });
 
     // 監聽 ICE 連接狀態
     pc.oniceconnectionstatechange = (evt) => {
       log("ICE 伺服器狀態變更", evt);
-      if (['failed;', 'closed'].includes(evt.target.iceGatheringState)) {
-        pc.close();
+      if (evt.target.iceGatheringState === "complete") {
+        pc.close(); // 此 peer connect 已經連接完畢，將其關閉
       }
     };
 
-    // 監聽 ICE Server(找尋到 ICE 候選位置後，透過 WebSocket Server 與另一位配對)
+    // 監聽 ICE Server(找尋到 ICE 候選位置後，透過 websocket Server 與另一位配對)
     pc.onicecandidate = async (evt) => {
       if (!evt.candidate) return;
       log("發現新 icecandidate", evt);
       // Send candidate to websocket server
-      webSocket.sendMessage({
+      websocket.sendMessage({
         type: SEND_TYPE.SEND_CANDIDATE,
         payload: { candidate: evt.candidate }
       });
@@ -112,24 +106,21 @@ export default (() => {
 
     // 接收 track 傳入
     pc.ontrack = (evt) => {
-      const fragment = document.createDocumentFragment();
-      evt.streams.forEach(stream => {
-        if (videoContainer.children.namedItem(stream.id)) return;
-        const remoteVideo = document.createElement("video");
-        remoteVideo.setAttribute("name", stream.id);
-        remoteVideo.setAttribute("width", "100%");
-        remoteVideo.setAttribute("autoplay", true);
-        remoteVideo.setAttribute("playsinline", true);
-        remoteVideo.srcObject = stream;
-        fragment.appendChild(remoteVideo);
-      });
-      videoContainer.appendChild(fragment);
+      const stream = evt.streams[0];
+      if (videoContainer.children.namedItem(stream.id)) return;
+      remoteVideo.setAttribute("name", stream.id);
+      remoteVideo.setAttribute("width", "100%");
+      remoteVideo.setAttribute("autoplay", true);
+      remoteVideo.setAttribute("playsinline", true);
+      remoteVideo.srcObject = stream;
+      videoContainer.appendChild(remoteVideo);
       log("接收 track", evt);
     };
 
     // 每當 WebRtc 進行會話連線時，在addTrack後會觸發該事件，通常會在此處理 createOffer，來通知remote peer與我們連線
-    pc.onnegotiationneeded = async () => {
+    pc.onnegotiationneeded = async (evt) => {
       try {
+        log("send offer 通知 remote peer 與我們連線", evt);
         await handleSendOffer();
       } catch (err) {
         console.error(`Onnegotiationneeded error =>`, err);
@@ -141,33 +132,21 @@ export default (() => {
       // log(`local track`, track);
       pc.addTrack(track, localStream);
     });
-
-    return pc;
   }
 
-  // 建立 localVideo offer, 設置 localDescription(本地流配置)
+  // 建立 offer, 設置 localDescription(本地流配置)
   async function handleSendOffer() {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     log("創建 offer", offer);
-
-    // 傳送 localVideo offer to others
-    webSocket.sendMessage({
-      type: SEND_TYPE.SEND_OFFER,
-      payload: { offer }
-    })
+    websocket.sendMessage({ type: SEND_TYPE.SEND_OFFER, payload: { offer } });
   };
   // 建立 answer
   async function handleSendAnswer() {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     log("創建 answer", answer);
-
-    // 傳送 answer to Others
-    webSocket.sendMessage({
-      type: SEND_TYPE.SEND_ANSWER,
-      payload: { answer }
-    })
+    websocket.sendMessage({ type: SEND_TYPE.SEND_ANSWER, payload: { answer } });
   };
   // 新增 ice candidate 候選人
   async function handleAppendNewCandidate(candidate) {
@@ -175,7 +154,10 @@ export default (() => {
   };
   // 設置 remote description
   async function handleRemoteDescription(desc) {
-    if (!pc) return console.log('尚未開啟連接!!!');
+    // 如果當前 peer 已經連線完畢(被關閉)，建立新的連接 for multiple peer connect
+    // if (pc.iceGatheringState === "closed") {
+    //   await createRtcConnect();
+    // }
 
     await pc.setRemoteDescription(desc);
   };

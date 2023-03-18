@@ -4,8 +4,10 @@ import EVENT_TYPE from './eventType.js';
 
 const handler = {
   __wss: null,
+  __getWss() { return handler.__wss },
+  __getClients() { return handler.__wss.clients },
+  __getRooms() { return handler.__wss.rooms },
   setWssConnect(wss) { handler.__wss = wss; },
-  getWss() { return handler.__wss },
   handlePushMessage(client, payload) {
     if (!payload.to) {
       handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 422, message: 'please given array of id in the room' });
@@ -30,11 +32,11 @@ const handler = {
         prevRoomInfo = { roomId: client.roomId, order: client.order };
       };
       // 判斷聊天室是否存在，不存在則初始化
-      if (!handler.getWss().rooms[payload.roomId]) {
-        handler.getWss().rooms[payload.roomId] = [];
+      if (!handler.__getWss().rooms[payload.roomId]) {
+        handler.__getWss().rooms[payload.roomId] = [];
       }
       // 儲存該 room 所有的使用者資訊
-      const len = handler.getWss().rooms[payload.roomId].push(client);
+      const len = handler.__getWss().rooms[payload.roomId].push(client);
       client.order = len - 1;
       // 更新使用者資訊
       client.role = payload.role;
@@ -68,14 +70,6 @@ const handler = {
   handleLeaveRoom(client) {
     handler.deleteClientFromRoom(client);
     handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE, code: 200, message: 'success' });
-  },
-  handleClientCameraOpened(client) {
-    const users = handler.findClientsOfRoom(client);
-    // handler.sendMessage(client, handler.createReturnDataWithSubClass({
-    //   type: EVENT_TYPE.RESPONSE,
-    //   subtype: EVENT_TYPE.ROOM_USERS,
-    //   data: users,
-    // }));
   },
   handleSendOffer(client, payload) {
     console.log('Received offer');
@@ -116,21 +110,20 @@ const handler = {
   // 每十五分鐘檢查聊天室、使用者狀態, 可根據情況判斷是否要 clearInterval
   handleCheckCleanUp() {
     setInterval(() => {
-      Object.keys(handler.getWss().rooms).forEach(key => {
-        if (handler.getWss().rooms[key].length === 0) {
-          // delete handler.getWss().rooms[key];
-          Reflect.deleteProperty(handler.getWss().rooms, key)
+      Object.keys(handler.__getWss().rooms).forEach(key => {
+        if (handler.__getWss().rooms[key].length === 0) {
+          // delete handler.__getWss().rooms[key];
+          Reflect.deleteProperty(handler.__getWss().rooms, key)
         }
       });
-      handler.getWss().clients.forEach(client => {
+      handler.__getWss().clients.forEach(client => {
         if (!client.isAlive) client.terminate();
       })
     }, 900000);
   },
-  // TODO: Received binary data logic
+  // TODO: Received binary data logic, do something for binary data
   handleBinaryData(data) {
     console.log("Binary data: \n", data);
-    // Do something for binary data
     // fs.writeFile('./my-img.jpeg', data, 'binary', (err) => {
     //   if (!err) console.log('Binary save success');
     // })
@@ -139,7 +132,7 @@ const handler = {
   /********* helper *********/
   findClient({ id, name }) {
     let temp;
-    handler.getWss().clients.forEach(client => {
+    handler.__getWss().clients.forEach(client => {
       if (client.readyState !== WebSocket.OPEN) return;
 
       if (client.id === id || client.name === name) {
@@ -150,7 +143,7 @@ const handler = {
   },
   findClientsOfRoom(client) {
     const temp = [];
-    const room = handler.getWss().rooms[client.roomId];
+    const room = handler.__getWss().rooms[client.roomId];
     if (!room) return temp;
     room.forEach(clientOfRoom => {
       if (clientOfRoom.id === client.id) return;
@@ -159,14 +152,14 @@ const handler = {
     return temp;
   },
   deleteClientFromRoom(client) {
-    const room = handler.getWss().rooms[client.roomId];
+    const room = handler.__getWss().rooms[client.roomId];
     if (room) {
       room.splice(client.order, 1);
       room.forEach((client, order) => { client.order = order; });
     }
   },
   sendBroadcastMessage(currentId, message) {
-    handler.getWss().clients.forEach(client => {
+    handler.__getWss().clients.forEach(client => {
       if (client.readyState !== WebSocket.OPEN) return;
 
       if (client.id !== currentId) {
@@ -176,7 +169,7 @@ const handler = {
   },
   sendMulticastMessage(userIds, message) {
     const set = new Set(userIds);
-    handler.getWss().clients.forEach(client => {
+    handler.__getWss().clients.forEach(client => {
       if (client.readyState !== WebSocket.OPEN) return;
 
       if (set.has(client.id)) {
@@ -194,10 +187,10 @@ const handler = {
       ws.send(data);
     }
   },
-  generateUserId(req, now) {
+  createUniqueId(req, now) {
     const namespace = process.env.UID_NAME_SPACE;
     const string =
-      `${req.headers.origin}-${now}-${handler.getWss().clients.size}`;
+      `${req.headers.origin}-${now}-${handler.__getWss().clients.size}`;
 
     return uuidv5(string, namespace);
   },

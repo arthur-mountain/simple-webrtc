@@ -47,6 +47,7 @@ function handleJoinRoom() {
     name: document.getElementById('name').value,
     role: document.getElementById('roles').value,
     roomId: document.getElementById('room-id').value,
+    seq: new URL(location).searchParams.get("seq"),
   }
 
   storage.set('info', info);

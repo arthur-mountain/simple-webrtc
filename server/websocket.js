@@ -22,7 +22,7 @@ wss.on('connection', (ws, req) => {
   // Open
   ws.on('open', () => { console.log('WebSocket opened'); });
   // Close
-  ws.on('close', () => { console.log('WebSocket disconnected'); });
+  ws.on('close', () => { console.log('WebSocket disconnected', ws); });
   // Message
   ws.on('message', handleMessage(ws));
 });
@@ -32,7 +32,6 @@ function handleMessage(client) {
     if (isBinary) return handler.handleBinaryData(data);
 
     const { type, payload } = JSON.parse(data);
-
     switch (type) {
       // 心跳檢測
       case EVENT_TYPE.PING: {
@@ -96,7 +95,7 @@ function handleMessage(client) {
 
 function handleConnected(ws, req) {
   const now = Date.now();
-  ws.id = handler.generateUserId(req, now);
+  ws.id = handler.createUniqueId(req, now);
   ws.isAlive = 1;
   handler.sendMessage(ws, { timestamp: now });
   handler.handleCheckCleanUp();
