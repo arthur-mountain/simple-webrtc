@@ -38,6 +38,7 @@ export default (() => {
       localVideo.name = localStream.id;
       localVideo.srcObject = localStream;
       await createRtcConnect();
+      await handleSendOffer();
       isMediaOpened = !0;
     } catch (error) {
       console.error('Open User Media error:\n', error)
@@ -66,7 +67,8 @@ export default (() => {
 
       // 接收 WebRtc Answer(ots)
       case SEND_TYPE.RECEIVE_ANSWER: {
-        // step1: Receive answer -> setRemoteDesc(answer)
+        if (pc.signalingState === "closed") await createRtcConnect();
+        // step2: Receive answer -> setRemoteDesc(answer)
         await handleRemoteDescription(resp.data.data.answer);
         log("RECEIVE_ANSWER", resp.data.data.answer);
         break;
@@ -144,19 +146,20 @@ export default (() => {
       log("接收 track", evt);
     });
 
-    // 每當 WebRtc 進行會話連線時，在addTrack後會觸發該事件，通常會在此處理 createOffer，來通知remote peer與我們連線
-    pc.addEventListener("negotiationneeded", (evt) => {
-      try {
-        log("send offer 通知 remote peer 與我們連線", evt);
-        handleSendOffer();
-      } catch (err) {
-        console.error(`Onnegotiationneeded error =>`, err);
-      }
-    });
+    // // 每當 WebRtc 進行會話連線時，在addTrack後會觸發該事件，通常會在此處理 createOffer，來通知remote peer與我們連線
+    // pc.addEventListener("negotiationneeded", (evt) => {
+    //   try {
+    //     log("send offer 通知 remote peer 與我們連線", evt);
+    //     handleSendOffer();
+    //   } catch (err) {
+    //     console.error(`Onnegotiationneeded error =>`, err);
+    //   }
+    // });
   };
 
   // 建立 offer
   async function handleSendOffer() {
+    if (pc.signalingState === "closed") return;
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     log("創建 offer", offer);
@@ -164,6 +167,7 @@ export default (() => {
   };
   // 建立 answer
   async function handleSendAnswer() {
+    if (pc.signalingState === "closed") return;
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     log("創建 answer", answer);
@@ -171,10 +175,12 @@ export default (() => {
   };
   // 新增 ice candidate 候選人
   async function handleAppendNewCandidate(candidate) {
+    if (pc.signalingState === "closed") return;
     await pc.addIceCandidate(new RTCIceCandidate(candidate));
   };
   // 設置 remote description
   async function handleRemoteDescription(desc) {
+    if (pc.signalingState === "closed") return;
     await pc.setRemoteDescription(desc);
   };
 
