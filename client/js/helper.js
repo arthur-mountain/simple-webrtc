@@ -5,9 +5,9 @@ const helpers = {
     remove: (key) => sessionStorage.removeItem(key),
     clear: () => sessionStorage.clear(),
   },
-  log: (title, content) => {
+  log: (title, ...contents) => {
     console.log(`********* [${title}] *********`);
-    console.log(content);
+    contents.forEach(c => console.log(c));
     console.log(`********* [${title}] *********`);
   }
 }

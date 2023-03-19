@@ -12,12 +12,17 @@ export default (() => {
   let websocket;
   let SEND_TYPE;
   let localStream;
+  let userinfo;
   const peers = {};
 
   function init({ ws }, MESSAGE_TYPE) {
     websocket = ws;
     SEND_TYPE = MESSAGE_TYPE;
   };
+
+  function setUserInfo(info) {
+    userinfo = info;
+  }
 
   // 取得視訊與語音資訊
   async function handleOpenUserMedia() {
@@ -28,9 +33,7 @@ export default (() => {
       localStream = await navigator.mediaDevices.getUserMedia(Constraints);
       localVideo.name = localStream.id;
       localVideo.srcObject = localStream;
-      // @TODO: 這裡應該用 ROOM_USERS 事件，然後迴圈建立 peer 連線和發送 offer 給其他人
-      await createRtcConnect();
-      await handleSendOffer();
+      websocket.sendMessage({ type: SEND_TYPE.WEB_RTC_OPENED });
     } catch (error) {
       console.error('Open User Media error:\n', error)
     }
@@ -44,37 +47,56 @@ export default (() => {
   };
 
   async function handleWebRtcMessage(resp) {
-    if (!localStream) return;
-    switch (resp.data.subtype) {
+    if (!localStream && !userinfo) return;
+    switch (resp.type) {
       // 接收 WebRtc Offer, 傳送 answer(ots)
       // 其他人須設置 offer
-      // @TODO: 取得 使用者資訊和 offer，回圈 peers 去設置 remoteDesc(answer)
-      case SEND_TYPE.RECEIVE_OFFER: {
-        // step1: Receive offer -> setRemoteDesc(offer)
-        await handleRemoteDescription(resp.data.data.offer);
-        // step2: Create answer -> send answer and setLocalDesc(answer); 
-        await handleSendAnswer();
-        log("RECEIVE_OFFER", resp.data.data.offer);
+      // @TODO: 取得使用者資訊和 offer，回圈 peers 去設置 remoteDesc(answer)
+      case SEND_TYPE.WEB_RTC_RECEIVE_OFFER: {
+        // step1: 判斷是否已經建立連接
+        if (peers[resp.data.id]) break;
+        // step2: 建立 peer 連線
+        const peer = await createRtcConnect();
+        // step3: set remote description(offer)
+        let isSuccess = await handleRemoteDescription(peer, resp.data.offer);
+        // step4: create answer -> send answer and setLocalDesc(answer); 
+        isSuccess &= await handleSendAnswer(peer, resp.data.id);
+        // step5: save user and peer instance as key-value pair
+        isSuccess && (peers[resp.data.id] = peer);
+        log("RECEIVE OFFER DONE", resp.data.offer);
         break;
       };
-
       // 接收 WebRtc Answer(ots)
       // 自己設置 offer
       // @TODO: 取得 使用者資訊和 answer，回圈 peers 去設置 remoteDesc(answer)
-      case SEND_TYPE.RECEIVE_ANSWER: {
+      case SEND_TYPE.WEB_RTC_RECEIVE_ANSWER: {
+        // step1: 判斷是否已經建立連接
+        if (peers[resp.data.id]) break;
+        // step2: 建立 peer 連線(取出自己已開啟的 peer 又或者 建立一個新的 peer)
+        const peer = peers[userinfo.id] || await createRtcConnect();
         // step1: Receive answer -> setRemoteDesc(answer)
-        await handleRemoteDescription(resp.data.data.answer);
-        log("RECEIVE_ANSWER", resp.data.data.answer);
+        await handleRemoteDescription(resp.data.answer);
+        log("RECEIVE_ANSWER", resp.data.answer);
         break;
       };
-
       // 接收 WebRtc candidate，並加入到 WebRtc candidate 候選人中(ots)
-      case SEND_TYPE.RECEIVE_CANDIDATE: {
-        await handleAppendNewCandidate(resp.data.data.candidate);
-        log("RECEIVE_CANDIDATE", resp.data.data.candidate);
+      case SEND_TYPE.WEB_RTC_RECEIVE_CANDIDATE: {
+        await handleAppendNewCandidate(resp.data.candidate);
+        log("RECEIVE_CANDIDATE", resp.data.candidate);
         break;
       };
-
+      // 開啟 webRtc 是否被允許
+      case SEND_TYPE.WEB_RTC_OPENED: {
+        // @TODO_IMPORTANT: 一個 offer 對應一個 answer 還是 一個 offer 通吃全部 answer, 如果是前者，那就要改成跑loop建立 多個offer去發送，取回多個 answer 去對應各個 offer
+        if (resp.data.code === 200) {
+          const peer = await createRtcConnect();
+          peers[userinfo.id] = peer;
+          await handleSendOffer(peer);
+        } else {
+          log("WEB_RTC_OPENED_FAILED", "admin don't allow you to connect webRtc");
+        }
+        break;
+      };
       default: {
         console.error("UnHandle webRtc sub type", resp)
       }
@@ -84,10 +106,7 @@ export default (() => {
   // 建立 P2P 連線
   async function createRtcConnect() {
     if (!localStream) return console.warn('media was not opened yet');
-    pc = new RTCPeerConnection({ iceServers });
-    // localStream.getTracks().forEach(track => {
-    //   pc.addTrack(track, localStream);
-    // });
+    const pc = new RTCPeerConnection({ iceServers });
     pc.addStream(localStream);
 
     // 監聽 ICE 連接狀態
@@ -104,11 +123,12 @@ export default (() => {
       log("發現新 icecandidate", evt);
       // Send candidate to websocket server
       websocket.sendMessage({
-        type: SEND_TYPE.SEND_CANDIDATE,
+        type: SEND_TYPE.WEB_RTC_SEND_CANDIDATE,
         payload: { candidate: evt.candidate }
       });
     });
 
+    // @TODO: track event or stream event;
     // 接收 track 傳入
     pc.addEventListener("track", (evt) => {
       const stream = evt.streams[0];
@@ -149,33 +169,56 @@ export default (() => {
     //     console.error(`Onnegotiationneeded error =>`, err);
     //   }
     // });
+
+    return pc;
   };
 
   // 建立 offer
-  async function handleSendOffer() {
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    log("創建 offer", offer);
-    websocket.sendMessage({ type: SEND_TYPE.SEND_OFFER, payload: { offer } });
+  async function handleSendOffer(peer) {
+    try {
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      log("創建 offer", offer);
+      websocket.sendMessage({ type: SEND_TYPE.WEB_RTC_SEND_OFFER, payload: { offer } });
+      return 1;
+    } catch (error) {
+      log("WEB RTC CREATE AND REPLY OFFER FAILED", error);
+    }
+    return 0;
   };
   // 建立 answer
-  async function handleSendAnswer() {
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    log("創建 answer", answer);
-    websocket.sendMessage({ type: SEND_TYPE.SEND_ANSWER, payload: { answer } });
+  async function handleSendAnswer(peer, to) {
+    try {
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      log("創建 answer", answer);
+      websocket.sendMessage({
+        type: SEND_TYPE.WEB_RTC_SEND_ANSWER, payload: { to, answer }
+      });
+      return 1;
+    } catch (error) {
+      log("WEB RTC CREATE AND REPLY ANSWER FAILED", error);
+    }
+    return 0;
   };
   // 新增 ice candidate 候選人
   async function handleAppendNewCandidate(candidate) {
     await pc.addIceCandidate(new RTCIceCandidate(candidate));
   };
   // 設置 remote description
-  async function handleRemoteDescription(desc) {
-    await pc.setRemoteDescription(desc);
+  async function handleRemoteDescription(peer, desc) {
+    try {
+      await peer.setRemoteDescription(desc);
+      return 1;
+    } catch (error) {
+      log("WEB_RTC_RECEIVE_OFFER", "set remote offer failed", error);
+    }
+    return 0;
   };
 
   return {
     init,
+    setUserInfo,
     handleOpenUserMedia,
     handleCloseUserMedia,
     handleWebRtcMessage,

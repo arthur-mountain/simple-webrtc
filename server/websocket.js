@@ -55,33 +55,47 @@ function handleMessage(client) {
         break;
       };
       // 接收與傳送 webRtc offer
-      case EVENT_TYPE.SEND_OFFER: {
+      case EVENT_TYPE.WEB_RTC_SEND_OFFER: {
         handler.handleSendOffer(client, payload);
         break;
       };
       // 接收與傳送 webRtc answer
-      case EVENT_TYPE.SEND_ANSWER: {
+      case EVENT_TYPE.WEB_RTC_SEND_ANSWER: {
         handler.handleSendAnswer(client, payload);
         break;
       };
       // 接收與傳送 webRtc candidate
-      case EVENT_TYPE.SEND_CANDIDATE: {
+      case EVENT_TYPE.WEB_RTC_SEND_CANDIDATE: {
         handler.handleSendCandidate(client, payload);
         break;
       };
+      // 請求開啟 webRtc
+      case EVENT_TYPE.WEB_RTC_OPENED: {
+        client.isWebRtcOpened = 1;
+        handler.sendMessage(client, { type: EVENT_TYPE.WEB_RTC_OPENED, code: 200, message: "success" });
+        break;
+      };
       // 加入聊天室
-      case EVENT_TYPE.JOIN_ROOM: {
+      case EVENT_TYPE.ROOM_JOIN: {
         handler.handleJoinRoom(client, payload);
         break;
       };
       // 離開聊天室
-      case EVENT_TYPE.LEAVE_ROOM: {
+      case EVENT_TYPE.ROOM_LEAVE: {
         handler.handleLeaveRoom(client);
         break;
       };
       // 回傳使用者資訊
-      case EVENT_TYPE.PERSONAL: {
-        handler.handleGetPersonal(client);
+      case EVENT_TYPE.RESPONSE_PERSONAL: {
+        handler.sendMessage(client, {
+          type: EVENT_TYPE.RESPONSE_PERSONAL,
+          data: {
+            id: client.id,
+            name: client.name,
+            role: client.role,
+            roomId: client.roomId,
+          },
+        });
         break;
       };
 

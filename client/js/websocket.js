@@ -11,21 +11,22 @@ export default (() => {
     { type: 'close', listener: defaultCloseListener },
     { type: 'error', listener: defaultErrorListener },
   ];
-  let SEND_TYPE = { JSON: 'JSON', BINARY: 'BINARY' };
+  let SEND_TYPE;
 
+  // @NOTICE: websocket 連線 init 時間點，進入房間才連線 or 頁面一載入就連線
   function init(listenerMap, TYPES) {
-    SEND_TYPE = { ...SEND_TYPE, ...TYPES };
+    SEND_TYPE = TYPES;
     ws = new WebSocket('ws://localhost:8001');
     events = events.map(event => {
-      const listener = listenerMap[event.type];
-      return listener ? { ...event, listener } : event
+      const cb = listenerMap[event.type];
+      return cb ? { ...event, listener: (evt) => event.listener(evt, cb) } : event;
     });
 
     window.addEventListener('beforeunload', leaveRoom);
   }
 
   // Default Listeners
-  function defaultOpenListener(_evt) {
+  function defaultOpenListener(evt, cb) {
     console.log("Websocket opened");
     // Health Check
     let lastTime = Date.now();
@@ -40,26 +41,24 @@ export default (() => {
       healthCheckId = requestIdleCallback(healthCheck, options);
     }
     requestIdleCallback(healthCheck, options);
-    // Websocket init
-    const payload = JSON.parse(sessionStorage.getItem('info'));
-    if (payload) {
-      sendMessage({ type: SEND_TYPE.JOIN_ROOM, payload });
-    }
+    cb && cb(evt);
   }
-  function defaultMessageListener(evt) {
-    console.log("Message listener received: \n", JSON.parse(evt.data));
+  function defaultMessageListener(evt, cb) {
+    cb && cb(evt);
   }
   // TODO: should reconnect?
-  function defaultCloseListener(evt) {
+  function defaultCloseListener(evt, cb) {
     handleReset();
+    cb && cb(evt);
     if (evt.wasClean) {
       console.log('Websocket disconnected');
     } else {
       console.log("Websocket connect dead");
     }
   }
-  function defaultErrorListener(_evt) {
+  function defaultErrorListener(evt, cb) {
     handleReset();
+    cb && cb(evt);
     console.log("Websocket connect error");
   }
 
@@ -68,18 +67,18 @@ export default (() => {
     if (healthCheckId) cancelIdleCallback(healthCheckId);
   }
 
-  function sendMessage(message, type = SEND_TYPE.JSON) {
+  function sendMessage(message, isJson = 1) {
     return new Promise((resolve, reject) => {
       try {
-        if (type === SEND_TYPE.JSON) {
+        if (isJson) {
           ws.send(JSON.stringify(message));
         } else {
           ws.send(message);
         };
         resolve();
       } catch (error) {
+        console.error('websocket send message error:', error.message);
         reject(error.message);
-        console.warn('send error:', error.message);
       }
     })
   };
@@ -88,14 +87,14 @@ export default (() => {
     events.forEach(({ type, listener }) => {
       ws.addEventListener(type, listener);
     });
-    sendMessage({ type: SEND_TYPE.JOIN_ROOM, payload: userInfo });
+    sendMessage({ type: SEND_TYPE.ROOM_JOIN, payload: userInfo });
   };
 
   function leaveRoom() {
     events.forEach(({ type, listener }) => {
       ws.removeEventListener(type, listener);
     });
-    sendMessage({ type: SEND_TYPE.LEAVE_ROOM });
+    sendMessage({ type: SEND_TYPE.ROOM_LEAVE });
   };
 
   return {
@@ -103,6 +102,5 @@ export default (() => {
     joinRoom,
     leaveRoom,
     sendMessage,
-    SEND_TYPE,
   };
 })()

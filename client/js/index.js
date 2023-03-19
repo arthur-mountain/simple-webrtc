@@ -5,16 +5,16 @@ import pc from './webRtc.js';
 window.addEventListener("DOMContentLoaded", init);
 
 let MESSAGE_TYPE; // Message type
-const proxyData = new Proxy({ info: {}, messages: [] }, { set: handleProxyData });
+const proxyData = new Proxy({ info: null, messages: [] }, { set: handleProxyData });
 
 // @TODO: pc.createRtcConnect 會建立多個 peer connect for multiple room.
 async function init() {
-  proxyData.info = storage.get('info') || {};
-
   MESSAGE_TYPE = await (await fetch('http://localhost:8000/type', { method: 'POST' })).json();
-  ws.init({ message: handleWsMessage }, MESSAGE_TYPE);
-  pc.init({ ws }, MESSAGE_TYPE);
+  ws.init({ message: handleWsMessage, }, MESSAGE_TYPE);
+  pc.init({ ws, }, MESSAGE_TYPE);
   handleEventRegister();
+  // @TODO: 應該在 proxy info 裡進行 ws.joinRoom, 不過會遇到 ws 尚未連接完畢就 send message 的錯誤
+  proxyData.info = storage.get('info');
 }
 
 // 註冊事件
@@ -47,7 +47,6 @@ function handleJoinRoom() {
     name: document.getElementById('name').value,
     role: document.getElementById('roles').value,
     roomId: document.getElementById('room-id').value,
-    seq: new URL(location).searchParams.get("seq"),
   }
 
   storage.set('info', info);
@@ -70,13 +69,13 @@ function handleRoomSendMessage(evt) {
 
 // 取得使用者資訊
 function handlePersonal() {
-  ws.sendMessage({ type: MESSAGE_TYPE.PERSONAL });
+  ws.sendMessage({ type: MESSAGE_TYPE.RESPONSE_PERSONAL });
 };
 
 // 離開聊天室
 function handleLeaveRoom() {
   storage.clear();
-  proxyData.info = {};
+  proxyData.info = null;
   proxyData.messages = [];
   ws.leaveRoom();
 };
@@ -87,14 +86,16 @@ function handleProxyData(obj, key, val, _receive) {
     const chatProfile = document.getElementById('chatProfile');
     const chatArea = document.getElementById('chatArea');
 
-    if (val.roomId) {
+    if (val && val.roomId) {
       chatProfile.classList.add('hidden');
       chatArea.classList.remove('hidden');
+      pc.setUserInfo(obj[key] = val);
     } else {
       chatProfile.classList.remove('hidden');
       chatArea.classList.add('hidden');
     }
-    obj[key] = val;
+
+    return true;
   }
 
   if (key === 'messages') {
@@ -110,39 +111,36 @@ function handleProxyData(obj, key, val, _receive) {
         </li>
       `;
     }
+    // 單筆訊息
     if (typeof val === 'string') {
       obj[key].push(val);
 
       chatWrapper.insertAdjacentHTML('beforeend', renderMessageStr(val));
     }
-    if (Array.isArray(val)) {
+    // 多筆訊息(讀取歷史訊息...etc)
+    if (Array.isArray(val) && val.length) {
+      const fragment = document.createDocumentFragment();
+      val.forEach(message => {
+        const tmpDiv = document.createElement('div');
+        tmpDiv.innerHTML = renderMessageStr(message);
+        fragment.appendChild(tmpDiv.firstElementChild);
+      });
+
       obj[key] = val;
-
-      if (obj[key].length) {
-        const fragment = document.createDocumentFragment();
-
-        obj[key].forEach(message => {
-          const tmpDiv = document.createElement('div');
-          tmpDiv.innerHTML = renderMessageStr(message);
-          fragment.appendChild(tmpDiv.firstElementChild);
-        })
-
-        chatWrapper.appendChild(fragment);
-      }
+      chatWrapper.appendChild(fragment);
     }
+
+    return true;
   }
   // console.log(`🚀 ~ handleProxyData ~ obj`, obj);
   // console.log(`🚀 ~ handleProxyData ~ val`, val);
   // console.log(`🚀 ~ handleProxyData ~ key`, key);
-  return true;
+  return false; // will print error when set unknown key to proxy object
 }
 
 // 接收 websocket message
 async function handleWsMessage(evt) {
   const resp = JSON.parse(evt.data);
-  // if (resp.code !== 200 && !resp.timestamp) {
-  //   return console.error(`UnExpect error!!! code: ${resp.code}`)
-  // }
 
   // self to self => s to s(sts)
   // others to self => o to s(ots)
@@ -156,29 +154,31 @@ async function handleWsMessage(evt) {
     };
 
     // Response(sts)
-    case MESSAGE_TYPE.RESPONSE: {
+    case MESSAGE_TYPE.RESPONSE:
+    case MESSAGE_TYPE.RESPONSE_PERSONAL:
+    case MESSAGE_TYPE.RESPONSE_ROOM_USERS:
+    case MESSAGE_TYPE.RESPONSE_ERROR: {
       handleResponse(resp);
       break;
     };
 
     // 加入聊天室(ots)
-    // @TODO: server回傳加入的用戶訊息，這裡負責建立 peer, 需維護 peer array
-    // if (!peerList[obj.account] && v !== userName) {
-    //  createRtcConnect(obj); // 將用戶訊息和peer關聯後放入 peer array
-    //  }
-    case MESSAGE_TYPE.JOIN_ROOM: {
+    case MESSAGE_TYPE.ROOM_JOIN: {
       log("SOME ONE JOIN ROOM", resp);
       break;
     };
 
     // webRtc(ots)
-    case MESSAGE_TYPE.WEB_RTC: {
+    case MESSAGE_TYPE.WEB_RTC:
+    case MESSAGE_TYPE.WEB_RTC_RECEIVE_OFFER:
+    case MESSAGE_TYPE.WEB_RTC_RECEIVE_ANSWER:
+    case MESSAGE_TYPE.WEB_RTC_RECEIVE_CANDIDATE: {
       pc.handleWebRtcMessage(resp);
       break;
     };
 
     // 有人離開聊天室(system)
-    case MESSAGE_TYPE.DISCONNECT: {
+    case MESSAGE_TYPE.SYSTEM_DISCONNECT: {
       log("RECEIVE_DISCONNECT", resp);
       break;
     };
@@ -190,11 +190,11 @@ async function handleWsMessage(evt) {
 };
 
 function handleResponse(resp) {
-  switch (resp.data.subtype) {
+  switch (resp.type) {
     // 儲存使用者資訊(id, name, role, roomId)(ots)
-    case MESSAGE_TYPE.PERSONAL: {
-      proxyData.info = resp.data.data;
-      log("RECEIVE PERSONAL", resp.data.data);
+    case MESSAGE_TYPE.RESPONSE_PERSONAL: {
+      proxyData.info = resp.data;
+      log("RECEIVE_PERSONAL", resp.data);
       break;
     };
 
