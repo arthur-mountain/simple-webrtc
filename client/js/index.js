@@ -162,6 +162,10 @@ async function handleWsMessage(evt) {
     };
 
     // 加入聊天室(ots)
+    // @TODO: server回傳加入的用戶訊息，這裡負責建立 peer, 需維護 peer array
+    // if (!peerList[obj.account] && v !== userName) {
+    //  createRtcConnect(obj); // 將用戶訊息和peer關聯後放入 peer array
+    //  }
     case MESSAGE_TYPE.JOIN_ROOM: {
       log("SOME ONE JOIN ROOM", resp);
       break;

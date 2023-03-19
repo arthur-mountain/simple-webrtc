@@ -7,21 +7,12 @@ export default (() => {
   const localVideo = videoContainer.querySelector('#localVideo');
   const iceServers = [{
     urls: 'stun:stun.l.google.com:19302' // Google's public STUN server
-    // urls: ['stun:stun.l.google.com:19302', "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302", "stun:stun3.l.google.com:19302", "stun:stun4.l.google.com:19302",] // Google's public STUN server
   }];
   let pc;
   let websocket;
   let SEND_TYPE;
   let localStream;
-  let isMediaOpened = 0;
-  const proxyStreams = new Proxy([], {
-    set(target, key, stream, _receive) {
-      if (key === "length") return target;
-
-      target[key] = stream;
-      return target;
-    }
-  });
+  const peers = {};
 
   function init({ ws }, MESSAGE_TYPE) {
     websocket = ws;
@@ -30,16 +21,16 @@ export default (() => {
 
   // 取得視訊與語音資訊
   async function handleOpenUserMedia() {
-    if (isMediaOpened) return console.warn('media was already opened');
+    if (localStream) return console.warn('media was already opened');
     const Constraints = { audio: true, video: true };
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia(Constraints);
       localVideo.name = localStream.id;
       localVideo.srcObject = localStream;
+      // @TODO: 這裡應該用 ROOM_USERS 事件，然後迴圈建立 peer 連線和發送 offer 給其他人
       await createRtcConnect();
       await handleSendOffer();
-      isMediaOpened = !0;
     } catch (error) {
       console.error('Open User Media error:\n', error)
     }
@@ -47,15 +38,17 @@ export default (() => {
 
   // 關閉視訊與語音資訊
   function handleCloseUserMedia() {
-    if (!isMediaOpened) return console.warn('media was not opened yet');
+    if (!localStream) return console.warn('media was not opened yet');
 
     // @TODO: 關閉 peer instance and send message, remove all of video
   };
 
   async function handleWebRtcMessage(resp) {
-    if (!isMediaOpened) return;
+    if (!localStream) return;
     switch (resp.data.subtype) {
       // 接收 WebRtc Offer, 傳送 answer(ots)
+      // 其他人須設置 offer
+      // @TODO: 取得 使用者資訊和 offer，回圈 peers 去設置 remoteDesc(answer)
       case SEND_TYPE.RECEIVE_OFFER: {
         // step1: Receive offer -> setRemoteDesc(offer)
         await handleRemoteDescription(resp.data.data.offer);
@@ -66,9 +59,10 @@ export default (() => {
       };
 
       // 接收 WebRtc Answer(ots)
+      // 自己設置 offer
+      // @TODO: 取得 使用者資訊和 answer，回圈 peers 去設置 remoteDesc(answer)
       case SEND_TYPE.RECEIVE_ANSWER: {
-        if (pc.signalingState === "closed") await createRtcConnect();
-        // step2: Receive answer -> setRemoteDesc(answer)
+        // step1: Receive answer -> setRemoteDesc(answer)
         await handleRemoteDescription(resp.data.data.answer);
         log("RECEIVE_ANSWER", resp.data.data.answer);
         break;
@@ -89,7 +83,7 @@ export default (() => {
 
   // 建立 P2P 連線
   async function createRtcConnect() {
-    if (!localStream) return console.error("local stream is not available");
+    if (!localStream) return console.warn('media was not opened yet');
     pc = new RTCPeerConnection({ iceServers });
     // localStream.getTracks().forEach(track => {
     //   pc.addTrack(track, localStream);
@@ -159,7 +153,6 @@ export default (() => {
 
   // 建立 offer
   async function handleSendOffer() {
-    if (pc.signalingState === "closed") return;
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     log("創建 offer", offer);
@@ -167,7 +160,6 @@ export default (() => {
   };
   // 建立 answer
   async function handleSendAnswer() {
-    if (pc.signalingState === "closed") return;
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     log("創建 answer", answer);
@@ -175,12 +167,10 @@ export default (() => {
   };
   // 新增 ice candidate 候選人
   async function handleAppendNewCandidate(candidate) {
-    if (pc.signalingState === "closed") return;
     await pc.addIceCandidate(new RTCIceCandidate(candidate));
   };
   // 設置 remote description
   async function handleRemoteDescription(desc) {
-    if (pc.signalingState === "closed") return;
     await pc.setRemoteDescription(desc);
   };
 
