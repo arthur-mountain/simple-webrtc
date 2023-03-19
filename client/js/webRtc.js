@@ -13,8 +13,15 @@ export default (() => {
   let websocket;
   let SEND_TYPE;
   let localStream;
-  let isOpened = 0;
-  // const weakVideoPeerMap = new WeakMap();
+  let isMediaOpened = 0;
+  const proxyStreams = new Proxy([], {
+    set(target, key, stream, _receive) {
+      if (key === "length") return target;
+
+      target[key] = stream;
+      return target;
+    }
+  });
 
   function init({ ws }, MESSAGE_TYPE) {
     websocket = ws;
@@ -23,16 +30,15 @@ export default (() => {
 
   // 取得視訊與語音資訊
   async function handleOpenUserMedia() {
-    if (isOpened) return console.warn('media was already opened');
+    if (isMediaOpened) return console.warn('media was already opened');
     const Constraints = { audio: true, video: true };
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia(Constraints);
       localVideo.name = localStream.id;
       localVideo.srcObject = localStream;
-      // @TODO: create multiple peers for each other
       await createRtcConnect();
-      isOpened = !0;
+      isMediaOpened = !0;
     } catch (error) {
       console.error('Open User Media error:\n', error)
     }
@@ -40,13 +46,13 @@ export default (() => {
 
   // 關閉視訊與語音資訊
   function handleCloseUserMedia() {
-    if (!isOpened) return console.warn('media was not opened yet');
+    if (!isMediaOpened) return console.warn('media was not opened yet');
 
     // @TODO: 關閉 peer instance and send message, remove all of video
   };
 
   async function handleWebRtcMessage(resp) {
-    if (!pc || !isOpened) return;
+    if (!isMediaOpened) return;
     switch (resp.data.subtype) {
       // 接收 WebRtc Offer, 傳送 answer(ots)
       case SEND_TYPE.RECEIVE_OFFER: {
@@ -81,23 +87,23 @@ export default (() => {
 
   // 建立 P2P 連線
   async function createRtcConnect() {
+    if (!localStream) return console.error("local stream is not available");
     pc = new RTCPeerConnection({ iceServers });
-    // set local stream to each peer instance
-    localStream.getTracks().forEach(track => {
-      // log(`local track`, track);
-      pc.addTrack(track, localStream);
-    });
+    // localStream.getTracks().forEach(track => {
+    //   pc.addTrack(track, localStream);
+    // });
+    pc.addStream(localStream);
 
     // 監聽 ICE 連接狀態
-    pc.oniceconnectionstatechange = (evt) => {
+    pc.addEventListener("iceconnectionstatechange", (evt) => {
       log("ICE 伺服器狀態變更", evt);
       if (evt.target.iceGatheringState === "complete") {
         pc.close(); // 此 peer connect 已經連接完畢，將其關閉
       }
-    };
+    });
 
     // 監聽 ICE Server(找尋到 ICE 候選位置後，透過 websocket Server 與另一位配對)
-    pc.onicecandidate = async (evt) => {
+    pc.addEventListener("icecandidate", (evt) => {
       if (!evt.candidate) return;
       log("發現新 icecandidate", evt);
       // Send candidate to websocket server
@@ -105,33 +111,51 @@ export default (() => {
         type: SEND_TYPE.SEND_CANDIDATE,
         payload: { candidate: evt.candidate }
       });
-    };
+    });
 
     // 接收 track 傳入
-    pc.ontrack = (evt) => {
-      if (videoContainer.children.namedItem(evt.streams[0].id)) return;
+    pc.addEventListener("track", (evt) => {
+      const stream = evt.streams[0];
+      if (!stream.active) return console.warn("stream is not active");
+
+      if (videoContainer.children.namedItem(stream.id)) {
+        const item = videoContainer.children.namedItem(stream.id);
+        if (item.srcObject !== stream) item.srcObject = stream;
+        return;
+      }
       const remoteVideo = document.createElement("video");
-      remoteVideo.setAttribute("name", evt.streams[0].id);
+      remoteVideo.setAttribute("name", stream.id);
       remoteVideo.setAttribute("width", "100%");
       remoteVideo.setAttribute("autoplay", true);
       remoteVideo.setAttribute("playsinline", true);
-      remoteVideo.srcObject = evt.streams[0];
+      remoteVideo.srcObject = stream;
       videoContainer.appendChild(remoteVideo);
+
+      stream.oninactive = (evt) => {
+        log("track inactive", evt);
+        const item = videoContainer.children.namedItem(evt.target.id);
+
+        if (item && item.srcObject === evt.target) {
+          const div = document.createElement("div");
+          div.textContent = `user connect failed`;
+          item.replaceWith(div);
+        }
+      }
       log("接收 track", evt);
-    };
+    });
 
     // 每當 WebRtc 進行會話連線時，在addTrack後會觸發該事件，通常會在此處理 createOffer，來通知remote peer與我們連線
-    pc.onnegotiationneeded = async (evt) => {
+    pc.addEventListener("negotiationneeded", (evt) => {
       try {
         log("send offer 通知 remote peer 與我們連線", evt);
-        await handleSendOffer();
+        handleSendOffer();
       } catch (err) {
         console.error(`Onnegotiationneeded error =>`, err);
       }
-    };
+    });
   };
 
-  // 建立 offer, 設置 localDescription(本地流配置)
+  // 建立 offer
   async function handleSendOffer() {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);

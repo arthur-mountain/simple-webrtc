@@ -11,7 +11,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.resolve(process.cwd(), '../client')));
 
 app.get('/', (_req, res) => {
-  res.render('index.html')
+  res.render('index.html');
 });
 
 app.get('/favicon.ico', (_, res) => {
