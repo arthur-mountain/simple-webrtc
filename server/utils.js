@@ -57,8 +57,11 @@ const handler = {
     });
   },
   handleLeaveRoom(client) {
-    handler.deleteClientFromRoom(client);
-    handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.SYSTEM_DISCONNECT, code: 200, message: `${client.name} 已離開聊天室`, data: { id: client.id, name: client.name } });
+    const id = client.id, name = client.name;
+    const isDeleted = handler.deleteClientFromRoom(client);
+    if (isDeleted) {
+      handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.SYSTEM_DISCONNECT, code: 200, message: `${name} 已離開聊天室`, data: { id, name } });
+    }
   },
   // @TODO: 也可以再多新增一個 webRtcOpened 的 client array
   handleWebRtcOpened(client) {
@@ -174,7 +177,9 @@ const handler = {
     if (room) {
       room.splice(client.order, 1);
       room.forEach((c, order) => { c.order = order; });
+      return 1;
     }
+    return 0;
   },
   sendBroadcastMessage(currentId, message, callback = null) {
     handler.__getWss().clients.forEach(client => {

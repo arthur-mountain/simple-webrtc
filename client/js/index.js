@@ -34,6 +34,21 @@ function handleEventRegister() {
   inputText.addEventListener("keyup", handleRoomSendMessage);
 }
 
+// 開啟視訊
+function handleOpenMedia(e) {
+  let updatedText;
+
+  if (e.target.textContent === "open video") {
+    pc.handleOpenUserMedia();
+    updatedText = "close video"
+  } else {
+    pc.handleWebRtcCleanUp();
+    updatedText = "open video"
+  }
+
+  e.target.textContent = updatedText;
+}
+
 // 開關聊天窗
 function handleToggleChatWin(e) {
   e.preventDefault();
@@ -77,6 +92,7 @@ function handleLeaveRoom() {
   storage.clear();
   proxyData.info = null;
   proxyData.messages = [];
+  pc.handleWebRtcCleanUp();
   ws.leaveRoom();
 };
 
@@ -170,6 +186,7 @@ async function handleWsMessage(evt) {
 
     // webRtc(ots)
     case MESSAGE_TYPE.WEB_RTC:
+    case MESSAGE_TYPE.WEB_RTC_OPENED:
     case MESSAGE_TYPE.WEB_RTC_RECEIVE_OFFER:
     case MESSAGE_TYPE.WEB_RTC_RECEIVE_ANSWER:
     case MESSAGE_TYPE.WEB_RTC_RECEIVE_CANDIDATE: {
@@ -179,6 +196,7 @@ async function handleWsMessage(evt) {
 
     // 有人離開聊天室(system)
     case MESSAGE_TYPE.SYSTEM_DISCONNECT: {
+      pc.handleWebRtcDeleteById(resp.data.id);
       log("RECEIVE_DISCONNECT", resp);
       break;
     };
