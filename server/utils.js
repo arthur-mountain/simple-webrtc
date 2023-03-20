@@ -8,27 +8,6 @@ const handler = {
   // __getClients() { return handler.__wss.clients },
   // __getRooms() { return handler.__wss.rooms },
   setWssConnect(wss) { handler.__wss = wss; },
-  handlePushMessage(client, payload) {
-    if (!payload.to) {
-      handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE_ERROR, code: 400, message: 'please given id or array of id' });
-      return;
-    }
-
-    if (typeof payload.to === 'string') {
-      return;
-    }
-
-    if (Array.isArray(payload.to)) {
-      const failList = handler.sendMulticastMessage(payload.to);
-      if (failList.length > 0) {
-        const message = `Those user not founded.\n [${failList}]`
-        handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE_ERROR, code: 404, message });
-      }
-      return;
-    }
-
-    handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE_ERROR, code: 400, message: 'badRequest' });
-  },
   handleJoinRoom(client, payload) {
     if (!payload.roomId) {
       handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE_ERROR, code: 400, message: 'sorry the room id is required' });
@@ -81,12 +60,22 @@ const handler = {
     handler.deleteClientFromRoom(client);
     handler.sendBroadcastMessage(client.id, { type: EVENT_TYPE.SYSTEM_DISCONNECT, code: 200, message: `${client.name} 已離開聊天室`, data: { id: client.id, name: client.name } });
   },
+  // @TODO: 也可以再多新增一個 webRtcOpened 的 client array
+  handleWebRtcOpened(client) {
+    const clientIds =
+      handler.findClientsInRoom(client).reduce((ids, client) => {
+        if (!client.isWebRtcOpened) return ids;
+        ids.push(client.id);
+        return ids;
+      }, []);
+
+    handler.sendMessage(client, { type: EVENT_TYPE.WEB_RTC_OPENED, code: 200, message: "success", data: { clientIds } });
+  },
   handleSendOffer(client, payload) {
     console.log('Received offer');
-    handler.sendBroadcastMessage(client.id, null, (c) => {
-      if (!c.isWebRtcOpened) return;
-
-      handler.sendMessage(c, {
+    const target = this.findClientInRoom({ id: payload.to }, client.roomId);
+    if (target) {
+      handler.sendMessage(target, {
         type: EVENT_TYPE.WEB_RTC_RECEIVE_OFFER,
         code: 200,
         message: "success",
@@ -95,16 +84,21 @@ const handler = {
           name: client.name,
           offer: payload.offer,
         },
-      })
-      return 1;
-    });
+      });
+    }
+
+    // payload.to 是從 webRtcOpened回傳的，故暫時先不做任何處理
+    // handler.sendMessage(client, {
+    //   type: EVENT_TYPE.WEB_RTC_RECEIVE_OFFER_ERROR,
+    //   code: 404,
+    //   message: "data not found",
+    // });
   },
   handleSendAnswer(client, payload) {
     console.log('Received answer');
-    handler.sendBroadcastMessage(client.id, null, (c) => {
-      if (!c.isWebRtcOpened) return;
-
-      handler.sendMessage(c, {
+    const target = this.findClientInRoom({ id: payload.to }, client.roomId);
+    if (target) {
+      handler.sendMessage(target, {
         type: EVENT_TYPE.WEB_RTC_RECEIVE_ANSWER,
         code: 200,
         message: "success",
@@ -113,9 +107,8 @@ const handler = {
           name: client.name,
           answer: payload.answer,
         },
-      })
-      return 1;
-    });
+      });
+    }
   },
   handleSendCandidate(client, payload) {
     console.log('Received candidate');
@@ -160,24 +153,19 @@ const handler = {
   },
 
   /********* helper *********/
-  findClient({ id, name }) {
-    let temp;
-    handler.__getWss().clients.forEach(client => {
-      if (client.readyState !== WebSocket.OPEN) return;
+  findClientInRoom({ id, name }, roomId = null) {
+    const room = handler.__getWss().rooms[roomId];
+    if (!room) return null;
 
-      if (client.id === id || client.name === name) {
-        temp = client;
-      }
-    });
-    return temp;
+    return room.find(c => c.id === id || c.name === name);
   },
   findClientsInRoom(client, roomId = null) {
     const temp = [];
     const room = handler.__getWss().rooms[roomId || client.roomId];
     if (!room) return temp;
-    room.forEach(clientInRoom => {
-      if (clientInRoom.id === client.id) return;
-      temp.push(clientInRoom.id);
+    room.forEach(c => {
+      if (c.id === client.id) return;
+      temp.push(c);
     });
     return temp;
   },
@@ -203,17 +191,32 @@ const handler = {
       }
     });
   },
-  sendMulticastMessage(userIds, message) {
-    const set = new Set(userIds);
-    handler.__getWss().clients.forEach(client => {
-      if (client.readyState !== WebSocket.OPEN) return;
+  sendMulticastMessage(
+    client,
+    payload = { type: null, to: null, message: null },
+  ) {
+    if (!payload || !payload.type || !payload.to || !payload.message) {
+      handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE_ERROR, code: 400, message: 'multicast error, payload is required' });
+      return;
+    }
 
-      if (set.has(client.id)) {
-        set.delete(client.id);
-        handler.sendMessage(client, { type: EVENT_TYPE.MESSAGE, ...message });
-      }
-    });
-    return [...set];
+    const ids =
+      typeof payload.to === 'string' ? payload.to.split(",") : payload.to;
+    if (Array.isArray(ids)) {
+      const set = new Set(ids);
+      handler.__getWss().clients.forEach(c => {
+        if (c.readyState !== WebSocket.OPEN) return;
+
+        if (set.has(c.id)) {
+          handler.sendMessage(c, { type: payload.type, ...message });
+          set.delete(c.id);
+        }
+      });
+      return [...set]; // fails.length > 0, has failed
+    }
+
+    handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE_ERROR, code: 400, message: 'badRequest' });
+
   },
   // TODO: Send binary data logic
   sendMessage(ws, data, isJson = 1) {

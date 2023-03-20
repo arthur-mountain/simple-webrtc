@@ -51,7 +51,7 @@ function handleMessage(client) {
       };
       // 推播訊息(針對特定 user 進行訊息推播)
       case EVENT_TYPE.PUSH_MESSAGE: {
-        handler.handlePushMessage(client, payload);
+        handler.sendMulticastMessage(client, payload);
         break;
       };
       // 接收與傳送 webRtc offer
@@ -72,7 +72,7 @@ function handleMessage(client) {
       // 請求開啟 webRtc
       case EVENT_TYPE.WEB_RTC_OPENED: {
         client.isWebRtcOpened = 1;
-        handler.sendMessage(client, { type: EVENT_TYPE.WEB_RTC_OPENED, code: 200, message: "success" });
+        handler.handleWebRtcOpened(client);
         break;
       };
       // 加入聊天室

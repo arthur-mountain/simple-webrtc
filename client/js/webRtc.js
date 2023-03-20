@@ -88,10 +88,15 @@ export default (() => {
       // 開啟 webRtc 是否被允許
       case SEND_TYPE.WEB_RTC_OPENED: {
         // @TODO_IMPORTANT: 一個 offer 對應一個 answer 還是 一個 offer 通吃全部 answer, 如果是前者，那就要改成跑loop建立 多個offer去發送，取回多個 answer 去對應各個 offer
-        if (resp.data.code === 200) {
-          const peer = await createRtcConnect();
-          peers[userinfo.id] = peer;
-          await handleSendOffer(peer);
+        if (resp.code === 200) {
+          const ids = resp.data.clientIds;
+          if (ids.length) {
+            ids.forEach(async (id) => {
+              const peer = await createRtcConnect();
+              peers[id] = peer;
+              handleSendOffer(peer, id);
+            })
+          }
         } else {
           log("WEB_RTC_OPENED_FAILED", "admin don't allow you to connect webRtc");
         }
@@ -174,12 +179,14 @@ export default (() => {
   };
 
   // 建立 offer
-  async function handleSendOffer(peer) {
+  async function handleSendOffer(peer, to) {
     try {
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       log("創建 offer", offer);
-      websocket.sendMessage({ type: SEND_TYPE.WEB_RTC_SEND_OFFER, payload: { offer } });
+      websocket.sendMessage({
+        type: SEND_TYPE.WEB_RTC_SEND_OFFER, payload: { to, offer }
+      });
       return 1;
     } catch (error) {
       log("WEB RTC CREATE AND REPLY OFFER FAILED", error);
