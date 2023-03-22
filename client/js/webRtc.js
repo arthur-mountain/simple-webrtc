@@ -29,6 +29,7 @@ export default (() => {
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia(Constraints);
+      localVideo.id = "localVideo"
       localVideo.name = localStream.id;
       localVideo.srcObject = localStream;
       videoContainer.prepend(localVideo);
@@ -47,6 +48,7 @@ export default (() => {
         if (peers[resp.data.id] && peers[resp.data.id].remoteDescription) break;
         // step2: 建立 peer 連線
         const peer = peers[resp.data.id] || await createRtcConnect(resp.data.id);
+        if (peer.iceGatheringState === "closed") break;
         // step3: set remote description(offer)
         let isSuccess = await handleRemoteDescription(peer, resp.data.offer);
         // step4: create answer -> send answer and setLocalDesc(answer); 
@@ -59,14 +61,17 @@ export default (() => {
       // 接收 WebRtc Answer, 自己設置 offer
       case SEND_TYPE.WEB_RTC_RECEIVE_ANSWER: {
         // step1: 判斷是否已經建立連接
-        if (peers[resp.data.id] && peers[resp.data.id].remoteDescription) break;
-        await handleRemoteDescription(peers[resp.data.id], resp.data.answer);
+        const peer = peers[resp.data.id];
+        if (peer && peer.remoteDescription) break;
+        if (peer.iceGatheringState === "closed") break;
+        await handleRemoteDescription(peer, resp.data.answer);
         log("RECEIVE_ANSWER", resp.data.answer);
         break;
       };
       // 接收 WebRtc candidate，並加入到 WebRtc candidate 候選人中(ots)
       case SEND_TYPE.WEB_RTC_RECEIVE_CANDIDATE: {
         Object.values(peers).forEach(async (peer) => {
+          if (peer.iceGatheringState === "closed") return;
           await handleAppendNewCandidate(peer, resp.data.candidate);
         })
         log("RECEIVE_CANDIDATE", resp.data.candidate);
@@ -76,12 +81,31 @@ export default (() => {
       case SEND_TYPE.WEB_RTC_OPENED: {
         if (resp.code === 200) {
           const ids = resp.data.clientIds;
+          console.log(`🚀 ~ handleWebRtcMessage ~ ids:`, ids);
           if (ids.length) {
+            // @TODO: 一次傳送全部的 offer, 而不是單則單則發送？
+            const success = [], failure = [];
             ids.forEach(async (id) => {
               const peer = await createRtcConnect(id);
-              peers[id] = peer;
-              await handleSendOffer(peer, id);
+              if (peer) {
+                peers[id] = peer;
+                const offer = await createOffer(peer);
+                if (offer) {
+                  success.push({ to: id, offer });
+                } else {
+                  failure.push(id);
+                }
+              } else {
+                failure.push(id);
+              }
             })
+
+            log(`🚀 ~ success:`, success);
+            log(`🚀 ~ failure:`, failure);
+
+            // websocket.sendMessage({
+            //   type: SEND_TYPE.WEB_RTC_SEND_OFFER, payload: { to, offer }
+            // });
           }
         } else {
           log("WEB_RTC_OPENED_FAILED", "admin don't allow you to connect webRtc");
@@ -176,7 +200,7 @@ export default (() => {
     // pc.addEventListener("negotiationneeded", (evt) => {
     //   try {
     //     log("send offer 通知 remote peer 與我們連線", evt);
-    //     handleSendOffer();
+    //     createOffer();
     //   } catch (err) {
     //     console.error(`Onnegotiationneeded error =>`, err);
     //   }
@@ -186,15 +210,12 @@ export default (() => {
   };
 
   // 建立 offer
-  async function handleSendOffer(peer, to) {
+  async function createOffer(peer) {
     try {
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       log("創建 offer", offer);
-      websocket.sendMessage({
-        type: SEND_TYPE.WEB_RTC_SEND_OFFER, payload: { to, offer }
-      });
-      return 1;
+      return offer;
     } catch (error) {
       log("WEB RTC CREATE AND REPLY OFFER FAILED", error);
     }
@@ -217,7 +238,13 @@ export default (() => {
   };
   // 新增 ice candidate 候選人
   async function handleAppendNewCandidate(peer, candidate) {
-    await peer.addIceCandidate(new RTCIceCandidate(candidate));
+    try {
+      await peer.addIceCandidate(new RTCIceCandidate(candidate));
+      return 1;
+    } catch (error) {
+      log("WEB_RTC_APPEND_CANDIDATE", "set candidate failed", error);
+    }
+    return 0;
   };
   // 設置 remote description
   async function handleRemoteDescription(peer, desc) {
@@ -234,7 +261,6 @@ export default (() => {
     init,
     setUserInfo,
     handleOpenUserMedia,
-    handleCloseUserMedia,
     handleWebRtcMessage,
     handleWebRtcDeleteById,
     handleWebRtcCleanUp,
