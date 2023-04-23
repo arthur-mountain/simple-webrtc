@@ -76,19 +76,23 @@ const handler = {
   },
   handleSendOffer(client, payload) {
     console.log('Received offer');
-    const target = this.findClientInRoom({ id: payload.to }, client.roomId);
-    if (target) {
-      handler.sendMessage(target, {
-        type: EVENT_TYPE.WEB_RTC_RECEIVE_OFFER,
-        code: 200,
-        message: "success",
-        data: {
-          id: client.id,
-          name: client.name,
-          offer: payload.offer,
-        },
-      });
-    }
+    payload.forEach(({ to, offer }) => {
+      if (!offer) return;
+
+      const target = this.findClientInRoom({ id: to }, client.roomId);
+      if (target) {
+        handler.sendMessage(target, {
+          type: EVENT_TYPE.WEB_RTC_RECEIVE_OFFER,
+          code: 200,
+          message: "success",
+          data: {
+            id: client.id,
+            name: client.name,
+            offer,
+          },
+        });
+      }
+    });
 
     // payload.to 是從 webRtcOpened回傳的，故暫時先不做任何處理
     // handler.sendMessage(client, {
@@ -221,7 +225,6 @@ const handler = {
     }
 
     handler.sendMessage(client, { type: EVENT_TYPE.RESPONSE_ERROR, code: 400, message: 'badRequest' });
-
   },
   // TODO: Send binary data logic
   sendMessage(ws, data, isJson = 1) {

@@ -81,31 +81,21 @@ export default (() => {
       case SEND_TYPE.WEB_RTC_OPENED: {
         if (resp.code === 200) {
           const ids = resp.data.clientIds;
-          console.log(`🚀 ~ handleWebRtcMessage ~ ids:`, ids);
           if (ids.length) {
-            // @TODO: 一次傳送全部的 offer, 而不是單則單則發送？
-            const success = [], failure = [];
-            ids.forEach(async (id) => {
+            const promises = ids.map(async (id) => {
               const peer = await createRtcConnect(id);
-              if (peer) {
-                peers[id] = peer;
-                const offer = await createOffer(peer);
-                if (offer) {
-                  success.push({ to: id, offer });
-                } else {
-                  failure.push(id);
-                }
-              } else {
-                failure.push(id);
-              }
+              if (!peer) return Promise.reject(id);
+              peers[id] = peer;
+              const offer = await createOffer(peer);
+              if (!offer) return Promise.reject(id);
+
+              return { to: id, offer }
             })
+            const values = await Promise.allSettled(promises);
 
-            log(`🚀 ~ success:`, success);
-            log(`🚀 ~ failure:`, failure);
-
-            // websocket.sendMessage({
-            //   type: SEND_TYPE.WEB_RTC_SEND_OFFER, payload: { to, offer }
-            // });
+            websocket.sendMessage({
+              type: SEND_TYPE.WEB_RTC_SEND_OFFER, payload: values.map(v => v.status === 'fulfilled' ? v.value : { id: v.reason })
+            });
           }
         } else {
           log("WEB_RTC_OPENED_FAILED", "admin don't allow you to connect webRtc");
@@ -134,6 +124,7 @@ export default (() => {
   // 建立 P2P 連線
   async function createRtcConnect(id) {
     if (!localStream) return console.warn('media was not opened yet');
+    if (!id) return console.warn('empty id to connect with');
     const pc = new RTCPeerConnection({ iceServers });
     localStream.getTracks().forEach((track) => {
       pc.addTrack(track, localStream)
