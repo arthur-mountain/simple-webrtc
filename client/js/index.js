@@ -26,7 +26,7 @@ function handleEventRegister() {
     inputText = document.querySelector('#inputText'),
     toggleChatWin = document.querySelector('#toggleChatWin');
 
-  mediaBtn.addEventListener("click", pc.handleOpenUserMedia);
+  mediaBtn.addEventListener("click", handleOpenMedia);
   joinRoomBtn.addEventListener("click", handleJoinRoom);
   getInfoBtn.addEventListener("click", handlePersonal);
   toggleChatWin.addEventListener("click", handleToggleChatWin);
@@ -38,15 +38,15 @@ function handleEventRegister() {
 function handleOpenMedia(e) {
   let updatedText;
 
-  if (e.target.textContent === "open video") {
+  if (e.target.innerText === "open video") {
     pc.handleOpenUserMedia();
-    updatedText = "close video"
+    updatedText = "close video";
   } else {
     pc.handleWebRtcCleanUp();
-    updatedText = "open video"
+    updatedText = "open video";
   }
 
-  e.target.textContent = updatedText;
+  e.target.innerText = updatedText;
 }
 
 // 開關聊天窗

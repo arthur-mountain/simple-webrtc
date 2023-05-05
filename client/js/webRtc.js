@@ -26,6 +26,9 @@ export default (() => {
     if (localStream) return console.warn('media was already opened');
     const localVideo = document.createElement('video');
     const Constraints = { audio: true, video: true };
+    localVideo.addEventListener("canplay", () => {
+      localVideo.play();
+    }, { once: true });
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia(Constraints);
